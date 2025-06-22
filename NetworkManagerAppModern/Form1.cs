@@ -1,11 +1,12 @@
 using System;
-using System.Collections.Generic;
+using System.Drawing; // For SystemIcons
 using System.Windows.Forms;
 using System.Net.NetworkInformation; // Required for network interface access
 using System.Diagnostics; // Required for Process
-using System.Linq; // For LINQ operations like OfType
+using System.Collections.Generic; // For List<T>
+using System.Linq; // For LINQ operations
 
-namespace NetworkManagerApp
+namespace NetworkManagerAppModern
 {
     // Helper structure for defining columns
     public struct ColumnDefinition
@@ -26,59 +27,44 @@ namespace NetworkManagerApp
 
     public partial class Form1 : Form
     {
-        private List<ColumnDefinition> _allColumnDefinitions;
-        private List<string> _visibleColumnKeys; // Stores keys of visible columns
+        private List<ColumnDefinition> _allColumnDefinitions; // Keep it nullable or initialize in constructor
+        private List<string> _visibleColumnKeys;
 
         public Form1()
         {
             InitializeComponent();
-            InitializeColumnDefinitions();
+            InitializeColumnData(); // Call before first PopulateNetworkInterfaces
 
-            // Default visible columns
-            _visibleColumnKeys = new List<string> { "Name", "Description", "Status" };
+            // Icon Loading
+            try
+            {
+                // Assumes you have an icon resource named 'appicon' in your project's Properties.Resources
+                // Example: this.notifyIcon1.Icon = Properties.Resources.appicon;
+                 throw new NotImplementedException("Custom icon resource loading not yet fully implemented. Using fallback.");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Custom icon loading failed: {ex.Message}. Using fallback system icon.");
+                this.notifyIcon1.Icon = SystemIcons.Application;
+            }
+            this.notifyIcon1.Visible = true;
 
-            // Wire up event handlers for NotifyIcon
+            // Wire up event handlers
             this.notifyIcon1.DoubleClick += new System.EventHandler(this.NotifyIcon1_DoubleClick);
             this.showHideMenuItem.Click += new System.EventHandler(this.ShowHideMenuItem_Click);
             this.exitMenuItem.Click += new System.EventHandler(this.ExitMenuItem_Click);
 
-            // Wire up event handlers for main buttons
             this.btnRefreshList.Click += new System.EventHandler(this.BtnRefreshList_Click);
             this.btnEnableSelected.Click += new System.EventHandler(this.BtnEnableSelected_Click);
             this.btnDisableSelected.Click += new System.EventHandler(this.BtnDisableSelected_Click);
             this.btnSelectColumns.Click += new System.EventHandler(this.BtnSelectColumns_Click);
 
-            // Set the NotifyIcon's icon
-            // PLEASE REPLACE 'appicon.ico' with your actual icon file added to resources.
-            // Example: If you add 'appicon.ico' to a 'Resources' folder and set its build action to 'Embedded Resource',
-            // and your project's default namespace is NetworkManagerApp, it might be accessible via:
-            // this.notifyIcon1.Icon = new System.Drawing.Icon(GetType(), "Resources.appicon.ico");
-            // Or, if added to project resources directly (Project > Properties > Resources > Add Existing File):
-            // this.notifyIcon1.Icon = NetworkManagerApp.Properties.Resources.appicon;
-            // For now, this is a placeholder. The application will run but the tray icon might be invisible or default.
-            try
-            {
-                // This is a common way if you add an icon to your project's Resources.resx
-                // 1. Go to Project > Properties > Resources.
-                // 2. If no Resources.resx, click "This project does not contain a default resources file. Click here to create one."
-                // 3. Select "Icons" from the dropdown, then "Add Resource" > "Add Existing File..." and pick your .ico file.
-                //    Let's assume you named it 'appicon' in the resources.
-                // this.notifyIcon1.Icon = Properties.Resources.appicon;
-                // If you don't have an icon yet, the program will work but the tray icon may not be ideal.
-                // For testing without an icon, you can temporarily comment out the line above.
-                // Visual Studio usually generates a default icon for the .exe itself, which notifyIcon might pick up if no icon is set.
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine("Icon loading failed: " + ex.Message);
-                // Optionally, inform the user or log this if an icon is critical.
-            }
 
-            // Populate the list on startup (this will now also set up columns)
+            // Populate the list on initial load
             PopulateNetworkInterfaces();
         }
 
-        private void InitializeColumnDefinitions()
+        private void InitializeColumnData()
         {
             _allColumnDefinitions = new List<ColumnDefinition>
             {
@@ -88,45 +74,51 @@ namespace NetworkManagerApp
                 new ColumnDefinition("ID", "ID", 200, ni => ni.Id),
                 new ColumnDefinition("Type", "Type", 100, ni => ni.NetworkInterfaceType.ToString()),
                 new ColumnDefinition("Speed", "Speed (Mbps)", 100, ni => (ni.Speed / 1000000).ToString()),
-                new ColumnDefinition("MAC", "MAC Address", 120, ni => ni.GetPhysicalAddress().ToString()),
+                new ColumnDefinition("MAC", "MAC Address", 120, ni => ni.GetPhysicalAddress()?.ToString() ?? "N/A"),
                 new ColumnDefinition("IsReceiveOnly", "Receive Only", 80, ni => ni.IsReceiveOnly.ToString()),
                 new ColumnDefinition("SupportsMulticast", "Multicast", 80, ni => ni.SupportsMulticast.ToString())
             };
+            // Default visible columns
+            _visibleColumnKeys = new List<string> { "Name", "Description", "Status" };
         }
 
         private void SetupListViewColumns()
         {
             listViewNetworkInterfaces.Columns.Clear();
+            if (_visibleColumnKeys == null || _allColumnDefinitions == null) return;
+
             foreach (string key in _visibleColumnKeys)
             {
-                ColumnDefinition colDef = _allColumnDefinitions.First(cd => cd.Key == key);
-                listViewNetworkInterfaces.Columns.Add(colDef.HeaderText, colDef.DefaultWidth);
+                // Find the column definition by key
+                ColumnDefinition colDef = _allColumnDefinitions.FirstOrDefault(cd => cd.Key == key);
+                // FirstOrDefault returns default(ColumnDefinition) if not found, check Key against null/empty
+                if (!string.IsNullOrEmpty(colDef.Key))
+                {
+                    listViewNetworkInterfaces.Columns.Add(colDef.HeaderText, colDef.DefaultWidth);
+                }
             }
         }
 
         private void PopulateNetworkInterfaces()
         {
-            // Ensure columns are set up based on _visibleColumnKeys
-            SetupListViewColumns();
-
+            SetupListViewColumns(); // Ensure columns are set up based on _visibleColumnKeys
             listViewNetworkInterfaces.Items.Clear();
+
+            if (_visibleColumnKeys == null || !_visibleColumnKeys.Any() || _allColumnDefinitions == null)
+            {
+                // No columns to display or definitions are missing
+                return;
+            }
 
             try
             {
                 NetworkInterface[] adapters = NetworkInterface.GetAllNetworkInterfaces();
                 foreach (NetworkInterface adapter in adapters)
                 {
-                    // Create ListViewItem with the first visible column's value
-                    ListViewItem item = null;
-                    if (_visibleColumnKeys.Any())
-                    {
-                        ColumnDefinition firstColDef = _allColumnDefinitions.First(cd => cd.Key == _visibleColumnKeys.First());
-                        item = new ListViewItem(firstColDef.ValueGetter(adapter));
-                    }
-                    else // Should not happen if we always have default columns, but as a fallback
-                    {
-                        item = new ListViewItem("N/A");
-                    }
+                    ListViewItem? item = null;
+                    // First visible column's value for the main item text
+                    ColumnDefinition firstColDef = _allColumnDefinitions.First(cd => cd.Key == _visibleColumnKeys.First());
+                    item = new ListViewItem(firstColDef.ValueGetter(adapter));
 
                     // Add sub-items for the rest of the visible columns
                     for (int i = 1; i < _visibleColumnKeys.Count; i++)
@@ -135,7 +127,7 @@ namespace NetworkManagerApp
                         item.SubItems.Add(colDef.ValueGetter(adapter));
                     }
 
-                    item.Tag = adapter;
+                    item.Tag = adapter; // Store the full adapter object for later use
                     listViewNetworkInterfaces.Items.Add(item);
                 }
             }
@@ -145,24 +137,24 @@ namespace NetworkManagerApp
             }
         }
 
-        private void BtnSelectColumns_Click(object sender, EventArgs e)
+        private void BtnSelectColumns_Click(object? sender, EventArgs e)
         {
-            List<string> allColumnDisplayNames = _allColumnDefinitions.Select(cd => cd.Key).ToList();
-            // Pass the *keys* of currently visible columns
-            List<string> currentlyVisibleKeys = new List<string>(_visibleColumnKeys);
+            if (_allColumnDefinitions == null || _visibleColumnKeys == null) return;
 
-            using (ColumnSelectionForm colForm = new ColumnSelectionForm(allColumnDisplayNames, currentlyVisibleKeys))
+            List<string> allColumnKeys = _allColumnDefinitions.Select(cd => cd.Key).ToList();
+            List<string> currentlyVisibleKeys = new List<string>(_visibleColumnKeys); // Pass a copy
+
+            using (ColumnSelectionForm colForm = new ColumnSelectionForm(allColumnKeys, currentlyVisibleKeys))
             {
-                if (colForm.ShowDialog() == DialogResult.OK)
+                if (colForm.ShowDialog(this) == DialogResult.OK) // Pass 'this' to center on parent
                 {
-                    _visibleColumnKeys = new List<string>(colForm.SelectedColumns);
-                    // Refresh columns and data
-                    PopulateNetworkInterfaces();
+                    _visibleColumnKeys = new List<string>(colForm.SelectedColumnKeys);
+                    PopulateNetworkInterfaces(); // Refresh columns and data
                 }
             }
         }
 
-        private void BtnRefreshList_Click(object sender, EventArgs e)
+        private void BtnRefreshList_Click(object? sender, EventArgs e)
         {
             PopulateNetworkInterfaces();
         }
@@ -170,17 +162,17 @@ namespace NetworkManagerApp
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            // Hide the main window on startup, ShowInTaskbar = false prevents it from appearing then disappearing
+            // Hide the main window on startup
             this.Visible = false;
-            this.ShowInTaskbar = false;
+            this.ShowInTaskbar = false; // Prevents it from flashing in the taskbar
         }
 
-        private void BtnEnableSelected_Click(object sender, EventArgs e)
+        private void BtnEnableSelected_Click(object? sender, EventArgs e)
         {
             UpdateSelectedInterfaces(true);
         }
 
-        private void BtnDisableSelected_Click(object sender, EventArgs e)
+        private void BtnDisableSelected_Click(object? sender, EventArgs e)
         {
             UpdateSelectedInterfaces(false);
         }
@@ -193,13 +185,10 @@ namespace NetworkManagerApp
                 return;
             }
 
-            string action = enable ? "enable" : "disable";
             foreach (ListViewItem selectedItem in listViewNetworkInterfaces.SelectedItems)
             {
                 if (selectedItem.Tag is NetworkInterface adapter)
                 {
-                    // Call SetInterfaceState but don't let it refresh the list individually.
-                    // The refresh will happen once after all selected items are processed.
                     ExecuteNetshCommand(adapter.Name, enable);
                 }
             }
@@ -207,7 +196,6 @@ namespace NetworkManagerApp
             PopulateNetworkInterfaces();
         }
 
-        // Renamed from SetInterfaceState to avoid confusion, as PopulateNetworkInterfaces is called by the caller
         private void ExecuteNetshCommand(string interfaceName, bool enable)
         {
             string arguments = $"interface set interface name=\"{interfaceName}\" admin={(enable ? "enable" : "disable")}";
@@ -216,18 +204,19 @@ namespace NetworkManagerApp
                 Verb = "runas", // Request administrator privileges
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
-                UseShellExecute = true // Must be true for Verb to work
+                UseShellExecute = true // Must be true for Verb to work with "runas"
             };
 
             try
             {
-                Process process = Process.Start(psi);
-                process.WaitForExit(); // Wait for the command to complete
-                // Optionally, check process.ExitCode here if needed, though UAC cancellation also results in non-zero
+                using (Process? process = Process.Start(psi))
+                {
+                    process?.WaitForExit();
+                }
             }
             catch (System.ComponentModel.Win32Exception ex)
             {
-                // This exception can occur if the user cancels the UAC prompt
+                // This exception can occur if the user cancels the UAC prompt or other OS errors
                 MessageBox.Show($"Operation to {(enable ? "enable" : "disable")} interface '{interfaceName}' was cancelled or failed.\nError: {ex.Message}", "Operation Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             catch (Exception ex)
@@ -236,23 +225,23 @@ namespace NetworkManagerApp
             }
         }
 
-        private void NotifyIcon1_DoubleClick(object sender, EventArgs e)
+
+        private void NotifyIcon1_DoubleClick(object? sender, EventArgs e)
         {
             ToggleFormVisibility();
         }
 
-        private void ShowHideMenuItem_Click(object sender, EventArgs e)
+        private void ShowHideMenuItem_Click(object? sender, EventArgs e)
         {
             ToggleFormVisibility();
         }
 
-        private void ExitMenuItem_Click(object sender, EventArgs e)
+        private void ExitMenuItem_Click(object? sender, EventArgs e)
         {
-            // Ensure the icon is disposed before exiting, otherwise it might linger.
             if (notifyIcon1 != null)
             {
-                notifyIcon1.Visible = false;
-                notifyIcon1.Dispose();
+                notifyIcon1.Visible = false; // Hide icon before disposing
+                notifyIcon1.Dispose(); // Release resources used by the icon
             }
             Application.Exit();
         }
@@ -262,15 +251,14 @@ namespace NetworkManagerApp
             if (this.Visible)
             {
                 this.Hide();
-                // Optionally, keep ShowInTaskbar false if you always want it hidden from taskbar when not active
-                // this.ShowInTaskbar = false;
+                // this.ShowInTaskbar = false; // Optional: remove from taskbar when hidden
             }
             else
             {
                 this.Show();
-                this.ShowInTaskbar = true; // Make it appear in taskbar when shown
                 this.WindowState = FormWindowState.Normal;
-                this.Activate(); // Bring to front
+                this.ShowInTaskbar = true;
+                this.Activate();
             }
         }
     }

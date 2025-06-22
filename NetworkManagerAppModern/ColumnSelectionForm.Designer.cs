@@ -1,4 +1,4 @@
-namespace NetworkManagerApp
+namespace NetworkManagerAppModern
 {
     partial class ColumnSelectionForm
     {
@@ -41,14 +41,14 @@ namespace NetworkManagerApp
             this.checkedListBoxColumns.FormattingEnabled = true;
             this.checkedListBoxColumns.Location = new System.Drawing.Point(12, 12);
             this.checkedListBoxColumns.Name = "checkedListBoxColumns";
-            this.checkedListBoxColumns.Size = new System.Drawing.Size(260, 184);
+            this.checkedListBoxColumns.Size = new System.Drawing.Size(290, 220); // Adjusted size
             this.checkedListBoxColumns.TabIndex = 0;
             //
             // btnOK
             //
             this.btnOK.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnOK.DialogResult = System.Windows.Forms.DialogResult.OK;
-            this.btnOK.Location = new System.Drawing.Point(116, 212);
+            this.btnOK.Location = new System.Drawing.Point(146, 248); // Adjusted location
             this.btnOK.Name = "btnOK";
             this.btnOK.Size = new System.Drawing.Size(75, 23);
             this.btnOK.TabIndex = 1;
@@ -59,7 +59,7 @@ namespace NetworkManagerApp
             //
             this.btnCancel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(197, 212);
+            this.btnCancel.Location = new System.Drawing.Point(227, 248); // Adjusted location
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(75, 23);
             this.btnCancel.TabIndex = 2;
@@ -69,10 +69,10 @@ namespace NetworkManagerApp
             // ColumnSelectionForm
             //
             this.AcceptButton = this.btnOK;
-            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(284, 247);
+            this.ClientSize = new System.Drawing.Size(314, 283); // Adjusted size
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnOK);
             this.Controls.Add(this.checkedListBoxColumns);
@@ -84,7 +84,6 @@ namespace NetworkManagerApp
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             this.Text = "Select Columns";
             this.ResumeLayout(false);
-
         }
 
         #endregion

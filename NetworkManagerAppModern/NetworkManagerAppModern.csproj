@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>appicon.ico</ApplicationIcon> <!-- We'll need an appicon.ico file for this -->
+  </PropertyGroup>
+
+  <!-- This section is for embedding the icon if you add it to the project root -->
+  <!-- For Properties/Resources.resx, it's handled differently (usually via VS UI) -->
+  <ItemGroup>
+    <Content Include="appicon.ico" Condition="Exists('appicon.ico')" />
+  </ItemGroup>
+
+</Project>

@@ -1,14 +1,14 @@
-namespace NetworkManagerApp
+namespace NetworkManagerAppModern
 {
     partial class Form1
     {
         /// <summary>
-        /// Required designer variable.
+        ///  Required designer variable.
         /// </summary>
         private System.ComponentModel.IContainer components = null;
 
         /// <summary>
-        /// Clean up any resources being used.
+        ///  Clean up any resources being used.
         /// </summary>
         /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
         protected override void Dispose(bool disposing)
@@ -23,43 +23,25 @@ namespace NetworkManagerApp
         #region Windows Form Designer generated code
 
         /// <summary>
-        /// Required method for Designer support - do not modify
-        /// the contents of this method with the code editor.
+        ///  Required method for Designer support - do not modify
+        ///  the contents of this method with the code editor.
         /// </summary>
         private void InitializeComponent()
         {
             this.components = new System.ComponentModel.Container();
-            this.components = new System.ComponentModel.Container();
             this.notifyIcon1 = new System.Windows.Forms.NotifyIcon(this.components);
             this.contextMenuStrip1 = new System.Windows.Forms.ContextMenuStrip(this.components);
             this.showHideMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.exitMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.contextMenuStrip1.SuspendLayout();
-            this.SuspendLayout();
-            //
-            // notifyIcon1
-            //
-            this.components = new System.ComponentModel.Container();
-            this.notifyIcon1 = new System.Windows.Forms.NotifyIcon(this.components);
-            this.contextMenuStrip1 = new System.Windows.Forms.ContextMenuStrip(this.components);
-            this.showHideMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.exitMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.listViewNetworkInterfaces = new System.Windows.Forms.ListView();
-            this.columnHeaderName = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
-            this.columnHeaderDescription = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
-            this.columnHeaderStatus = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
-            this.btnRefreshList = new System.Windows.Forms.Button();
-            this.btnEnableSelected = new System.Windows.Forms.Button();
-            this.btnDisableSelected = new System.Windows.Forms.Button();
-            this.btnSelectColumns = new System.Windows.Forms.Button();
             this.contextMenuStrip1.SuspendLayout();
             this.SuspendLayout();
             //
             // notifyIcon1
             //
             this.notifyIcon1.ContextMenuStrip = this.contextMenuStrip1;
-            this.notifyIcon1.Text = "Network Manager";
+            this.notifyIcon1.Text = "Network Manager (.NET)";
             this.notifyIcon1.Visible = true;
+            // Icon will be set in Form1.cs constructor
             //
             // contextMenuStrip1
             //
@@ -67,105 +49,86 @@ namespace NetworkManagerApp
             this.showHideMenuItem,
             this.exitMenuItem});
             this.contextMenuStrip1.Name = "contextMenuStrip1";
-            this.contextMenuStrip1.Size = new System.Drawing.Size(134, 48);
+            this.contextMenuStrip1.Size = new System.Drawing.Size(134, 48); // Adjusted size for typical menu items
             //
             // showHideMenuItem
             //
             this.showHideMenuItem.Name = "showHideMenuItem";
             this.showHideMenuItem.Size = new System.Drawing.Size(133, 22);
-            this.showHideMenuItem.Text = "Show/Hide";
+            this.showHideMenuItem.Text = "&Show/Hide";
             //
             // exitMenuItem
             //
             this.exitMenuItem.Name = "exitMenuItem";
             this.exitMenuItem.Size = new System.Drawing.Size(133, 22);
-            this.exitMenuItem.Text = "Exit";
+            this.exitMenuItem.Text = "E&xit";
             //
             // listViewNetworkInterfaces
             //
+            this.listViewNetworkInterfaces = new System.Windows.Forms.ListView();
+            this.columnHeaderName = new System.Windows.Forms.ColumnHeader();
+            this.columnHeaderDescription = new System.Windows.Forms.ColumnHeader();
+            this.columnHeaderStatus = new System.Windows.Forms.ColumnHeader();
+            this.btnRefreshList = new System.Windows.Forms.Button();
+            this.btnEnableSelected = new System.Windows.Forms.Button();
+            this.btnDisableSelected = new System.Windows.Forms.Button();
+            this.btnSelectColumns = new System.Windows.Forms.Button();
+            //
+            // Form1
+            //
+            this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.ClientSize = new System.Drawing.Size(800, 450);
+            this.Controls.Add(this.listViewNetworkInterfaces);
+            this.Controls.Add(this.btnRefreshList);
+            this.Controls.Add(this.btnEnableSelected);
+            this.Controls.Add(this.btnDisableSelected);
+            this.Controls.Add(this.btnSelectColumns);
+            this.Name = "Form1";
+            this.Text = "Network Device Manager (.NET)";
+            // Layout for ListView
             this.listViewNetworkInterfaces.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
             | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
+            this.listViewNetworkInterfaces.Location = new System.Drawing.Point(12, 12);
+            this.listViewNetworkInterfaces.Size = new System.Drawing.Size(776, 380);
+            this.listViewNetworkInterfaces.View = System.Windows.Forms.View.Details;
+            this.listViewNetworkInterfaces.FullRowSelect = true;
             this.listViewNetworkInterfaces.Columns.AddRange(new System.Windows.Forms.ColumnHeader[] {
             this.columnHeaderName,
             this.columnHeaderDescription,
             this.columnHeaderStatus});
-            this.listViewNetworkInterfaces.FullRowSelect = true;
-            this.listViewNetworkInterfaces.HideSelection = false;
-            this.listViewNetworkInterfaces.Location = new System.Drawing.Point(12, 12);
-            this.listViewNetworkInterfaces.Name = "listViewNetworkInterfaces";
-            this.listViewNetworkInterfaces.Size = new System.Drawing.Size(776, 380);
-            this.listViewNetworkInterfaces.TabIndex = 0;
-            this.listViewNetworkInterfaces.UseCompatibleStateImageBehavior = false;
-            this.listViewNetworkInterfaces.View = System.Windows.Forms.View.Details;
-            //
-            // columnHeaderName
-            //
             this.columnHeaderName.Text = "Name";
             this.columnHeaderName.Width = 150;
-            //
-            // columnHeaderDescription
-            //
             this.columnHeaderDescription.Text = "Description";
             this.columnHeaderDescription.Width = 250;
-            //
-            // columnHeaderStatus
-            //
             this.columnHeaderStatus.Text = "Status";
             this.columnHeaderStatus.Width = 100;
-            //
-            // btnRefreshList
-            //
+            // Layout for Buttons (simple flow layout from bottom-left)
             this.btnRefreshList.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.btnRefreshList.Location = new System.Drawing.Point(12, 405);
-            this.btnRefreshList.Name = "btnRefreshList";
             this.btnRefreshList.Size = new System.Drawing.Size(100, 23);
-            this.btnRefreshList.TabIndex = 1;
             this.btnRefreshList.Text = "Refresh List";
             this.btnRefreshList.UseVisualStyleBackColor = true;
-            //
-            // btnEnableSelected
-            //
+
             this.btnEnableSelected.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.btnEnableSelected.Location = new System.Drawing.Point(118, 405);
-            this.btnEnableSelected.Name = "btnEnableSelected";
-            this.btnEnableSelected.Size = new System.Drawing.Size(100, 23);
-            this.btnEnableSelected.TabIndex = 2;
+            this.btnEnableSelected.Size = new System.Drawing.Size(110, 23); // Slightly wider for text
             this.btnEnableSelected.Text = "Enable Selected";
             this.btnEnableSelected.UseVisualStyleBackColor = true;
-            //
-            // btnDisableSelected
-            //
+
             this.btnDisableSelected.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.btnDisableSelected.Location = new System.Drawing.Point(224, 405);
-            this.btnDisableSelected.Name = "btnDisableSelected";
-            this.btnDisableSelected.Size = new System.Drawing.Size(100, 23);
-            this.btnDisableSelected.TabIndex = 3;
+            this.btnDisableSelected.Location = new System.Drawing.Point(234, 405);
+            this.btnDisableSelected.Size = new System.Drawing.Size(110, 23); // Slightly wider for text
             this.btnDisableSelected.Text = "Disable Selected";
             this.btnDisableSelected.UseVisualStyleBackColor = true;
-            //
-            // btnSelectColumns
-            //
+
             this.btnSelectColumns.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnSelectColumns.Location = new System.Drawing.Point(688, 405);
-            this.btnSelectColumns.Name = "btnSelectColumns";
             this.btnSelectColumns.Size = new System.Drawing.Size(100, 23);
-            this.btnSelectColumns.TabIndex = 4;
             this.btnSelectColumns.Text = "Select Columns";
             this.btnSelectColumns.UseVisualStyleBackColor = true;
-            //
-            // Form1
-            //
-            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(800, 450);
-            this.Controls.Add(this.btnSelectColumns);
-            this.Controls.Add(this.btnDisableSelected);
-            this.Controls.Add(this.btnEnableSelected);
-            this.Controls.Add(this.btnRefreshList);
-            this.Controls.Add(this.listViewNetworkInterfaces);
-            this.Name = "Form1";
-            this.Text = "Network Device Manager";
+
             this.contextMenuStrip1.ResumeLayout(false);
             this.ResumeLayout(false);
 
