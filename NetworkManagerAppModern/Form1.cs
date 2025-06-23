@@ -81,6 +81,23 @@ namespace NetworkManagerAppModern
             this.btnSelectColumns.Click += new System.EventHandler(this.BtnSelectColumns_Click);
 
             PopulateNetworkInterfaces();
+
+            // Register for network change notifications
+            NetworkChange.NetworkAddressChanged += new NetworkAddressChangedEventHandler(AddressChangedCallback);
+        }
+
+        private void AddressChangedCallback(object? sender, EventArgs e)
+        {
+            // This event can be raised on a different thread.
+            // We need to invoke PopulateNetworkInterfaces on the UI thread.
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new MethodInvoker(PopulateNetworkInterfaces));
+            }
+            else
+            {
+                PopulateNetworkInterfaces();
+            }
         }
 
         private void InitializeColumnData()
@@ -98,7 +115,42 @@ namespace NetworkManagerAppModern
                 new ColumnDefinition("ID", "ID", 200, info => info.Id ?? ""),
             };
             // Default visible columns adjusted
-            _visibleColumnKeys = new List<string> { "Name", "Description", "AdminState", "OperationalState" };
+            // _visibleColumnKeys = new List<string> { "Name", "Description", "AdminState", "OperationalState" };
+            LoadColumnSettings();
+        }
+
+        private void LoadColumnSettings()
+        {
+            if (Properties.Settings.Default.VisibleColumnKeys != null && Properties.Settings.Default.VisibleColumnKeys.Count > 0)
+            {
+                _visibleColumnKeys = new List<string>();
+                foreach (string key in Properties.Settings.Default.VisibleColumnKeys)
+                {
+                    _visibleColumnKeys.Add(key);
+                }
+            }
+            else
+            {
+                // Default visible columns if no settings are saved
+                _visibleColumnKeys = new List<string> { "Name", "Description", "AdminState", "OperationalState" };
+            }
+        }
+
+        private void SaveColumnSettings()
+        {
+            if (_visibleColumnKeys != null)
+            {
+                if (Properties.Settings.Default.VisibleColumnKeys == null)
+                {
+                    Properties.Settings.Default.VisibleColumnKeys = new System.Collections.Specialized.StringCollection();
+                }
+                else
+                {
+                    Properties.Settings.Default.VisibleColumnKeys.Clear();
+                }
+                Properties.Settings.Default.VisibleColumnKeys.AddRange(_visibleColumnKeys.ToArray());
+                Properties.Settings.Default.Save();
+            }
         }
 
         private void SetupListViewColumns()
@@ -248,6 +300,7 @@ namespace NetworkManagerAppModern
                 if (colForm.ShowDialog(this) == DialogResult.OK) // Pass 'this' to center on parent
                 {
                     _visibleColumnKeys = new List<string>(colForm.SelectedColumnKeys);
+                    SaveColumnSettings(); // Save the new column selection
                     PopulateNetworkInterfaces(); // Refresh columns and data
                 }
             }
@@ -397,6 +450,11 @@ namespace NetworkManagerAppModern
                 this.ShowInTaskbar = false; // Optional: remove from taskbar
                 // Optionally, show a balloon tip from the tray icon
                 // notifyIcon1.ShowBalloonTip(1000, "Application Minimized", "Network Manager is running in the background.", ToolTipIcon.Info);
+            }
+            else if (_isExiting) // Or if it's a real exit
+            {
+                // Unregister network change notifications
+                NetworkChange.NetworkAddressChanged -= new NetworkAddressChangedEventHandler(AddressChangedCallback);
             }
             // If _isExiting is true, or if it's not UserClosing (e.g. Windows shutting down), allow the close
         }
