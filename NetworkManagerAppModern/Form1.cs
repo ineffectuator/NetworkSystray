@@ -191,26 +191,15 @@ namespace NetworkManagerAppModern
                 {
                     try
                     {
-                        // Get the IPv4 interface index.
-                        // Note: NetworkInterface.GetIPProperties() can be slow or throw if interface is unavailable.
-                        int ipv4Index = adapter.GetIPProperties().GetIPv4Properties().Index;
-                        if (ipv4Index > 0) // Interface index should be positive
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Attempting to {(enable ? "enable" : "disable")} interface using IfIndex: {ipv4Index} (Name: '{adapter.Name}', Desc: '{adapter.Description}')");
-                            ExecuteNetshCommandByIndex(ipv4Index.ToString(), enable, adapter.Description); // Pass original desc for error messages
-                        }
-                        else
-                        {
-                            MessageBox.Show($"Could not retrieve a valid interface index for '{adapter.Description}'. Operation aborted.", "Index Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        }
+                        // Reverting to use adapter.Name as per latest findings from manual testing
+                        string interfaceName = adapter.Name;
+                        System.Diagnostics.Debug.WriteLine($"Attempting to {(enable ? "enable" : "disable")} interface using Name: '{interfaceName}' (Desc: '{adapter.Description}')");
+                        ExecuteNetshCommandByName(interfaceName, enable);
                     }
-                    catch (NetworkInformationException netEx)
+                    catch (Exception ex)
                     {
-                        MessageBox.Show($"Error retrieving IP properties for '{adapter.Description}': {netEx.Message}. Cannot change state.", "Network Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
-                    catch (Exception ex) // Catch any other potential errors during index retrieval
-                    {
-                        MessageBox.Show($"An unexpected error occurred while preparing to change state for '{adapter.Description}': {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        // Catch any other potential errors during property access or preparation
+                        MessageBox.Show($"An unexpected error occurred while preparing to change state for '{adapter.Name}': {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
             }
@@ -218,11 +207,18 @@ namespace NetworkManagerAppModern
             PopulateNetworkInterfaces();
         }
 
-        // Modified to use ifindex
-        private void ExecuteNetshCommandByIndex(string interfaceIndex, bool enable, string originalInterfaceDescription)
+        // Reverted to use interface name, with enhanced logging
+        private void ExecuteNetshCommandByName(string interfaceName, bool enable)
         {
-            string arguments = $"interface set interface ifindex={interfaceIndex} admin={(enable ? "enable" : "disable")}";
-            System.Diagnostics.Debug.WriteLine($"Executing netsh with args: {arguments}");
+            System.Diagnostics.Debug.WriteLine($"ExecuteNetshCommandByName: Raw interfaceName received = '{interfaceName}'");
+
+            // For safety, if a name itself contains a quote, this basic approach might need more advanced escaping.
+            // However, standard interface names obtained from NetworkInterface.Name usually don't.
+            string processedName = interfaceName;
+
+            string arguments = $"interface set interface name=\"{processedName}\" admin={(enable ? "enable" : "disable")}";
+            System.Diagnostics.Debug.WriteLine($"ExecuteNetshCommandByName: Executing 'netsh.exe' with arguments: \"{arguments}\"");
+
             ProcessStartInfo psi = new ProcessStartInfo("netsh", arguments)
             {
                 Verb = "runas", // Request administrator privileges
@@ -245,40 +241,31 @@ namespace NetworkManagerAppModern
                 {
                     if (process == null)
                     {
-                        MessageBox.Show($"Failed to start netsh process for interface (Desc: '{originalInterfaceDescription}', Index: {interfaceIndex}).", "Process Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        MessageBox.Show($"Failed to start netsh process for interface '{processedName}'.", "Process Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
                     }
 
-                    process.WaitForExit(); // Wait for the UAC-elevated process to complete
+                    process.WaitForExit();
 
                     if (process.ExitCode != 0)
                     {
-                        // If UAC was denied, a Win32Exception "Operation canceled by user" (1223) is usually thrown and caught below.
-                        // Other non-zero exit codes from netsh indicate failure after successful elevation.
-                        string errorMsg = $"Netsh command failed for interface (Desc: '{originalInterfaceDescription}', Index: {interfaceIndex}) with exit code: {process.ExitCode}.";
-                        // Since we can't capture stdout/stderr directly with UseShellExecute=true,
-                        // we can't add more details from netsh here.
+                        string errorMsg = $"Netsh command failed for interface '{processedName}' with exit code: {process.ExitCode}.";
                         MessageBox.Show(errorMsg, "Netsh Command Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
-                    // else: ExitCode 0 usually means success.
                 }
             }
             catch (System.ComponentModel.Win32Exception ex)
             {
-                // Common Win32Exceptions:
-                // 1223: The operation was canceled by the user (UAC denial).
-                // 2: The system cannot find the file specified (netsh not found - very unlikely).
-                // 5: Access is denied (if 'runas' failed for some reason beyond UAC, or UAC was bypassed and permissions still insufficient).
-                string detailedError = $"Operation for interface (Desc: '{originalInterfaceDescription}', Index: {interfaceIndex}) failed.\nWin32 Error Code: {ex.NativeErrorCode}\nMessage: {ex.Message}";
-                if (ex.NativeErrorCode == 1223)
+                string detailedError = $"Operation for interface '{processedName}' failed.\nWin32 Error Code: {ex.NativeErrorCode}\nMessage: {ex.Message}";
+                if (ex.NativeErrorCode == 1223) // UAC Denied
                 {
-                    detailedError = $"Operation for interface (Desc: '{originalInterfaceDescription}', Index: {interfaceIndex}) was canceled by the user (UAC prompt denied).";
+                    detailedError = $"Operation for interface '{processedName}' was canceled by the user (UAC prompt denied).";
                 }
                 MessageBox.Show(detailedError, "Operation Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An unexpected error occurred while trying to modify interface (Desc: '{originalInterfaceDescription}', Index: {interfaceIndex}): {ex.Message}", "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"An unexpected error occurred while trying to modify interface '{processedName}': {ex.Message}", "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
