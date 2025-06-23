@@ -189,7 +189,9 @@ namespace NetworkManagerAppModern
             {
                 if (selectedItem.Tag is NetworkInterface adapter)
                 {
-                    ExecuteNetshCommand(adapter.Name, enable);
+                    // Try using adapter.Description instead of adapter.Name
+                    System.Diagnostics.Debug.WriteLine($"Attempting to { (enable ? "enable" : "disable") } interface using description: '{adapter.Description}' (Name was: '{adapter.Name}')");
+                    ExecuteNetshCommand(adapter.Description, enable);
                 }
             }
             // Refresh the list once after all operations are attempted
@@ -204,24 +206,57 @@ namespace NetworkManagerAppModern
                 Verb = "runas", // Request administrator privileges
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
-                UseShellExecute = true // Must be true for Verb to work with "runas"
+                UseShellExecute = true, // Must be true for Verb to work with "runas"
+                // For capturing output, UseShellExecute must be false.
+                // However, 'runas' verb requires UseShellExecute = true.
+                // This means we can't directly capture output when using 'runas' this way.
+                // The UAC prompt itself is handled by ShellExecute.
+                // If 'runas' fails silently or netsh errors out AFTER elevation, this direct capture won't work.
+                // We will primarily rely on ExitCode if the process runs.
+                // RedirectStandardOutput = true, // Cannot use with UseShellExecute = true
+                // RedirectStandardError = true   // Cannot use with UseShellExecute = true
             };
 
             try
             {
                 using (Process? process = Process.Start(psi))
                 {
-                    process?.WaitForExit();
+                    if (process == null)
+                    {
+                        MessageBox.Show($"Failed to start netsh process for interface '{interfaceName}'.", "Process Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    process.WaitForExit(); // Wait for the UAC-elevated process to complete
+
+                    if (process.ExitCode != 0)
+                    {
+                        // If UAC was denied, a Win32Exception "Operation canceled by user" (1223) is usually thrown and caught below.
+                        // Other non-zero exit codes from netsh indicate failure after successful elevation.
+                        string errorMsg = $"Netsh command failed for interface '{interfaceName}' with exit code: {process.ExitCode}.";
+                        // Since we can't capture stdout/stderr directly with UseShellExecute=true,
+                        // we can't add more details from netsh here.
+                        MessageBox.Show(errorMsg, "Netsh Command Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                    // else: ExitCode 0 usually means success.
                 }
             }
             catch (System.ComponentModel.Win32Exception ex)
             {
-                // This exception can occur if the user cancels the UAC prompt or other OS errors
-                MessageBox.Show($"Operation to {(enable ? "enable" : "disable")} interface '{interfaceName}' was cancelled or failed.\nError: {ex.Message}", "Operation Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // Common Win32Exceptions:
+                // 1223: The operation was canceled by the user (UAC denial).
+                // 2: The system cannot find the file specified (netsh not found - very unlikely).
+                // 5: Access is denied (if 'runas' failed for some reason beyond UAC, or UAC was bypassed and permissions still insufficient).
+                string detailedError = $"Operation for interface '{interfaceName}' failed.\nWin32 Error Code: {ex.NativeErrorCode}\nMessage: {ex.Message}";
+                if (ex.NativeErrorCode == 1223)
+                {
+                    detailedError = $"Operation for interface '{interfaceName}' was canceled by the user (UAC prompt denied).";
+                }
+                MessageBox.Show(detailedError, "Operation Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error {(enable ? "enabling" : "disabling")} interface '{interfaceName}': {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"An unexpected error occurred while trying to modify interface '{interfaceName}': {ex.Message}", "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
