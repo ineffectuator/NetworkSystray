@@ -630,6 +630,23 @@ namespace NetworkManagerAppModern
                 }
 
                 item.Tag = displayInfo.Name;
+
+                // FINAL CHECK LOGGING
+                if (item.Tag is string tagNameForFinalCheck && tagNameForFinalCheck.Equals("Wi-Fi", StringComparison.OrdinalIgnoreCase))
+                {
+                    System.Diagnostics.Debug.WriteLine($"FINAL CHECK for item '{tagNameForFinalCheck}' before adding to ListView:");
+                    System.Diagnostics.Debug.WriteLine($"  item.Text (Col 0) = '{item.Text}'");
+                    if (_visibleColumnKeys.Count > 1 && item.SubItems.Count > 0)
+                    {
+                        // Assuming AdminState is typically _visibleColumnKeys[1] which maps to SubItems[0]
+                        System.Diagnostics.Debug.WriteLine($"  item.SubItems[0].Text (Col 1, e.g., AdminState if Key={_visibleColumnKeys[1]}) = '{item.SubItems[0].Text}'");
+                    }
+                    if (_visibleColumnKeys.Count > 2 && item.SubItems.Count > 1)
+                    {
+                        // Assuming OperationalState is typically _visibleColumnKeys[2] which maps to SubItems[1]
+                        System.Diagnostics.Debug.WriteLine($"  item.SubItems[1].Text (Col 2, e.g., OpState if Key={_visibleColumnKeys[2]}) = '{item.SubItems[1].Text}'");
+                    }
+                }
                 listViewNetworkInterfaces.Items.Add(item);
             }
 
