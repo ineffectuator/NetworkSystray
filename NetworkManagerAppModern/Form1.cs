@@ -464,12 +464,24 @@ namespace NetworkManagerAppModern
                         var match = Regex.Match(line, @"^(?<admin>\S+)\s+(?<state>\S+)\s+(?<type>\S+)\s+(?<name>.+)$");
                         if (match.Success)
                         {
+                            string adminVal = match.Groups["admin"].Value.Trim();
+                            string stateVal = match.Groups["state"].Value.Trim();
+                            string typeVal = match.Groups["type"].Value.Trim();
+                            string nameVal = match.Groups["name"].Value.Trim();
+
+                            System.Diagnostics.Debug.WriteLine($"FetchInterfacesViaNetsh: Parsed Line: Raw='{line}'");
+                            System.Diagnostics.Debug.WriteLine($"  -> Admin='{adminVal}', State='{stateVal}', Type='{typeVal}', Name='{nameVal}'");
+
                             interfaces.Add(new SimpleNetInterfaceInfo
                             {
-                                AdminState = match.Groups["admin"].Value.Trim(),
-                                OperationalState = match.Groups["state"].Value.Trim(),
-                                Name = match.Groups["name"].Value.Trim()
+                                AdminState = adminVal,
+                                OperationalState = stateVal,
+                                Name = nameVal
                             });
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"FetchInterfacesViaNetsh: No regex match for line: '{line}'");
                         }
                     }
                 }
@@ -557,10 +569,14 @@ namespace NetworkManagerAppModern
 
             foreach (var baseInfo in netshInterfaces)
             {
+                // Log baseInfo before creating displayInfo
+                System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: Processing baseInfo: Name='{baseInfo.Name}', AdminState='{baseInfo.AdminState}', OperationalState='{baseInfo.OperationalState}'");
+
                 SimpleNetInterfaceInfo displayInfo = new SimpleNetInterfaceInfo {
                     Name = baseInfo.Name,
                     AdminState = baseInfo.AdminState,
                     OperationalState = baseInfo.OperationalState
+                    // Description, Type, ID will be populated next if available
                 };
 
                 if (systemInterfaces.TryGetValue(displayInfo.Name, out NetworkInterface? systemAdapter))
@@ -573,27 +589,33 @@ namespace NetworkManagerAppModern
                 ListViewItem item;
                 var firstKey = _visibleColumnKeys.FirstOrDefault();
                 if (firstKey == null) {
-                    System.Diagnostics.Debug.WriteLine("First visible column key is null, cannot create ListView item.");
+                    System.Diagnostics.Debug.WriteLine("PopulateNetworkInterfaces: First visible column key is null, cannot create ListView item.");
                     continue;
                 }
                 ColumnDefinition firstColDef = _allColumnDefinitions.FirstOrDefault(cd => cd.Key == firstKey);
                 if (string.IsNullOrEmpty(firstColDef.Key))
                 {
-                    System.Diagnostics.Debug.WriteLine($"First column definition for key '{firstKey}' not found. Skipping item.");
+                    System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: First column definition for key '{firstKey}' not found. Skipping item.");
                     continue;
                 }
-                item = new ListViewItem(firstColDef.ValueGetter(displayInfo));
+
+                string firstColText = firstColDef.ValueGetter(displayInfo);
+                System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: For item '{displayInfo.Name}', first visible column ('{firstKey}') text = '{firstColText}'");
+                item = new ListViewItem(firstColText);
 
                 for (int i = 1; i < _visibleColumnKeys.Count; i++)
                 {
-                    ColumnDefinition colDef = _allColumnDefinitions.First(cd => cd.Key == _visibleColumnKeys[i]);
+                    string currentKey = _visibleColumnKeys[i];
+                    ColumnDefinition colDef = _allColumnDefinitions.FirstOrDefault(cd => cd.Key == currentKey);
                     if (string.IsNullOrEmpty(colDef.Key))
                     {
-                        System.Diagnostics.Debug.WriteLine($"Column definition for key '{_visibleColumnKeys[i]}' not found. Skipping subitem.");
+                        System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: Column definition for key '{currentKey}' not found. Skipping subitem for '{displayInfo.Name}'.");
                         item.SubItems.Add("");
                         continue;
                     }
-                    item.SubItems.Add(colDef.ValueGetter(displayInfo));
+                    string subItemText = colDef.ValueGetter(displayInfo);
+                    System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: For item '{displayInfo.Name}', subitem for key='{currentKey}' (display index {i}, subitem index {i-1}) text = '{subItemText}'");
+                    item.SubItems.Add(subItemText);
                 }
 
                 item.Tag = displayInfo.Name;
@@ -710,7 +732,7 @@ namespace NetworkManagerAppModern
                         currentDisplayedAdminState = selectedItem.Text;
                         System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Reading AdminState from selectedItem.Text (display index 0): '{currentDisplayedAdminState}'");
                     }
-                    else if (adminStateDisplayIndex > 0 && selectedItem.SubItems.Count > (adminStateDisplayIndex - 1))
+                    else if (adminStateDisplayIndex > 0 && selectedItem.SubItems.Count > (adminStateDisplayIndex - 1)) // SubItem index is displayIndex - 1
                     {
                         currentDisplayedAdminState = selectedItem.SubItems[adminStateDisplayIndex - 1].Text;
                         System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Reading AdminState from selectedItem.SubItems[{adminStateDisplayIndex - 1}].Text: '{currentDisplayedAdminState}'");
@@ -757,7 +779,6 @@ namespace NetworkManagerAppModern
                         }
                         else
                         {
-                            // This case should have been caught by the read log, but defensive log here too.
                             System.Diagnostics.Debug.WriteLine($"Warning: AdminState column (display index {adminStateDisplayIndex}) still not found in SubItems for item {selectedItem.Tag} when trying to write. SubItem count: {selectedItem.SubItems.Count}");
                         }
                     }
