@@ -680,6 +680,7 @@ namespace NetworkManagerAppModern
                 return;
             }
 
+            string targetState = enable ? "Enabled" : "Disabled";
             string pendingStatusText = enable ? "Enabling..." : "Disabling...";
             int adminStateDisplayIndex = GetDisplayIndexOfColumnKey("AdminState");
 
@@ -687,9 +688,27 @@ namespace NetworkManagerAppModern
 
             foreach (ListViewItem selectedItem in listViewNetworkInterfaces.SelectedItems)
             {
-                selectedItem.ForeColor = SystemColors.GrayText;
+                string currentDisplayedAdminState = string.Empty;
+                if (adminStateDisplayIndex != -1)
+                {
+                    if (adminStateDisplayIndex == 0)
+                        currentDisplayedAdminState = selectedItem.Text;
+                    else if (adminStateDisplayIndex > 0 && selectedItem.SubItems.Count > (adminStateDisplayIndex - 1))
+                        currentDisplayedAdminState = selectedItem.SubItems[adminStateDisplayIndex - 1].Text;
+                }
 
-                if (adminStateDisplayIndex != -1) // If "AdminState" column is visible
+                // Pre-check: if already in the target state, or pending for it, skip.
+                if (currentDisplayedAdminState.Equals(targetState, StringComparison.OrdinalIgnoreCase) ||
+                    currentDisplayedAdminState.Equals(pendingStatusText, StringComparison.OrdinalIgnoreCase))
+                {
+                    System.Diagnostics.Debug.WriteLine($"Interface {selectedItem.Tag} is already in or pending '{targetState}' state. Skipping.");
+                    continue;
+                }
+
+                selectedItem.ForeColor = SystemColors.GrayText;
+                selectedItem.BackColor = SystemColors.ControlLight; // More prominent feedback for the whole row
+
+                if (adminStateDisplayIndex != -1)
                 {
                     if (adminStateDisplayIndex == 0)
                     {
@@ -700,6 +719,7 @@ namespace NetworkManagerAppModern
                         if (selectedItem.SubItems.Count > (adminStateDisplayIndex -1) )
                         {
                              selectedItem.SubItems[adminStateDisplayIndex - 1].Text = pendingStatusText;
+                             // To change only cell backcolor, would need OwnerDraw. For now, row color is set.
                         }
                         else
                         {
@@ -718,7 +738,14 @@ namespace NetworkManagerAppModern
                 }
             }
 
-            // Application.DoEvents(); // Optional
+            if (!interfaceNamesToProcess.Any())
+            {
+                System.Diagnostics.Debug.WriteLine("No interfaces needed processing after pre-checks.");
+                // Optional: Revert styling if all items were skipped and some were styled?
+                // For now, if an item was skipped, it wasn't styled. If some were styled and some skipped,
+                // the styled ones will be updated by the eventual refresh.
+                return;
+            }
 
             foreach (string interfaceNameToProcess in interfaceNamesToProcess)
             {
