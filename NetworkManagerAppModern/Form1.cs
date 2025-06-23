@@ -45,6 +45,7 @@ namespace NetworkManagerAppModern
         private List<ColumnDefinition> _allColumnDefinitions;
         private List<string> _visibleColumnKeys;
         private bool _isExiting = false; // Flag to allow proper exit
+        private System.Windows.Forms.Timer _networkRefreshTimer;
 
         public Form1()
         {
@@ -84,19 +85,42 @@ namespace NetworkManagerAppModern
 
             // Register for network change notifications
             NetworkChange.NetworkAddressChanged += new NetworkAddressChangedEventHandler(AddressChangedCallback);
+
+            // Initialize the refresh timer
+            _networkRefreshTimer = new System.Windows.Forms.Timer();
+            _networkRefreshTimer.Interval = 750; // 750ms delay, adjust as needed
+            _networkRefreshTimer.Tick += NetworkRefreshTimer_Tick;
+        }
+
+        private void NetworkRefreshTimer_Tick(object? sender, EventArgs e)
+        {
+            _networkRefreshTimer.Stop(); // Ensure it only runs once per trigger
+            PopulateNetworkInterfaces();
         }
 
         private void AddressChangedCallback(object? sender, EventArgs e)
         {
             // This event can be raised on a different thread.
-            // We need to invoke PopulateNetworkInterfaces on the UI thread.
-            if (this.InvokeRequired)
+            // Instead of direct population, start the timer to introduce a delay.
+            // This helps ensure that netsh has time to report the updated state.
+            if (!this.IsDisposed && this.Handle != IntPtr.Zero) // Ensure form is still valid
             {
-                this.Invoke(new MethodInvoker(PopulateNetworkInterfaces));
-            }
-            else
-            {
-                PopulateNetworkInterfaces();
+                if (this.InvokeRequired)
+                {
+                    this.BeginInvoke(new MethodInvoker(() => {
+                        if (!_networkRefreshTimer.Enabled)
+                        {
+                            _networkRefreshTimer.Start();
+                        }
+                    }));
+                }
+                else
+                {
+                    if (!_networkRefreshTimer.Enabled)
+                    {
+                        _networkRefreshTimer.Start();
+                    }
+                }
             }
         }
 
@@ -455,6 +479,12 @@ namespace NetworkManagerAppModern
             {
                 // Unregister network change notifications
                 NetworkChange.NetworkAddressChanged -= new NetworkAddressChangedEventHandler(AddressChangedCallback);
+                // Dispose the timer
+                if (_networkRefreshTimer != null)
+                {
+                    _networkRefreshTimer.Stop();
+                    _networkRefreshTimer.Dispose();
+                }
             }
             // If _isExiting is true, or if it's not UserClosing (e.g. Windows shutting down), allow the close
         }
