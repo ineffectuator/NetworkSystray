@@ -6,17 +6,32 @@ using System.Diagnostics; // Required for Process
 using System.Collections.Generic; // For List<T>
 using System.Linq; // For LINQ operations
 
+using System.Text.RegularExpressions; // For parsing netsh output
+
 namespace NetworkManagerAppModern
 {
+    // Helper class for storing info parsed from netsh
+    public class SimpleNetInterfaceInfo
+    {
+        public string Name { get; set; } = string.Empty;
+        public string AdminState { get; set; } = string.Empty; // e.g., "Enabled", "Disabled"
+        public string OperationalState { get; set; } = string.Empty; // e.g., "Connected", "Disconnected"
+        public string? Description { get; set; } // Optional: from NetworkInterface object
+        public string? Type { get; set; } // Optional
+        public string? Id { get; set; } // Optional
+
+        // We will primarily rely on Name for enabling/disabling via netsh
+    }
+
     // Helper structure for defining columns
     public struct ColumnDefinition
     {
-        public string Key { get; } // Unique key, can be same as HeaderText or different
+        public string Key { get; }
         public string HeaderText { get; }
         public int DefaultWidth { get; }
-        public Func<NetworkInterface, string> ValueGetter { get; }
+        public Func<SimpleNetInterfaceInfo, string> ValueGetter { get; } // Changed type here
 
-        public ColumnDefinition(string key, string headerText, int defaultWidth, Func<NetworkInterface, string> valueGetter)
+        public ColumnDefinition(string key, string headerText, int defaultWidth, Func<SimpleNetInterfaceInfo, string> valueGetter)
         {
             Key = key;
             HeaderText = headerText;
@@ -27,19 +42,17 @@ namespace NetworkManagerAppModern
 
     public partial class Form1 : Form
     {
-        private List<ColumnDefinition> _allColumnDefinitions; // Keep it nullable or initialize in constructor
+        private List<ColumnDefinition> _allColumnDefinitions;
         private List<string> _visibleColumnKeys;
 
         public Form1()
         {
             InitializeComponent();
-            InitializeColumnData(); // Call before first PopulateNetworkInterfaces
+            InitializeColumnData();
 
             // Icon Loading
             try
             {
-                // Assumes you have an icon resource named 'appicon' in your project's Properties.Resources
-                // Example: this.notifyIcon1.Icon = Properties.Resources.appicon;
                  throw new NotImplementedException("Custom icon resource loading not yet fully implemented. Using fallback.");
             }
             catch (Exception ex)
@@ -59,27 +72,25 @@ namespace NetworkManagerAppModern
             this.btnDisableSelected.Click += new System.EventHandler(this.BtnDisableSelected_Click);
             this.btnSelectColumns.Click += new System.EventHandler(this.BtnSelectColumns_Click);
 
-
-            // Populate the list on initial load
             PopulateNetworkInterfaces();
         }
 
         private void InitializeColumnData()
         {
+            // Columns will now be based on SimpleNetInterfaceInfo primarily
             _allColumnDefinitions = new List<ColumnDefinition>
             {
-                new ColumnDefinition("Name", "Name", 150, ni => ni.Name),
-                new ColumnDefinition("Description", "Description", 250, ni => ni.Description),
-                new ColumnDefinition("Status", "Status", 100, ni => ni.OperationalStatus.ToString()),
-                new ColumnDefinition("ID", "ID", 200, ni => ni.Id),
-                new ColumnDefinition("Type", "Type", 100, ni => ni.NetworkInterfaceType.ToString()),
-                new ColumnDefinition("Speed", "Speed (Mbps)", 100, ni => (ni.Speed / 1000000).ToString()),
-                new ColumnDefinition("MAC", "MAC Address", 120, ni => ni.GetPhysicalAddress()?.ToString() ?? "N/A"),
-                new ColumnDefinition("IsReceiveOnly", "Receive Only", 80, ni => ni.IsReceiveOnly.ToString()),
-                new ColumnDefinition("SupportsMulticast", "Multicast", 80, ni => ni.SupportsMulticast.ToString())
+                // We use a Func<SimpleNetInterfaceInfo, string> for ValueGetter
+                new ColumnDefinition("Name", "Name", 150, info => info.Name),
+                new ColumnDefinition("AdminState", "Admin State", 100, info => info.AdminState),
+                new ColumnDefinition("OperationalState", "Op. Status", 120, info => info.OperationalState),
+                new ColumnDefinition("Description", "Description", 250, info => info.Description ?? ""),
+                // Optional: Add more if we decide to merge with NetworkInterface objects later
+                new ColumnDefinition("Type", "Type", 100, info => info.Type ?? ""),
+                new ColumnDefinition("ID", "ID", 200, info => info.Id ?? ""),
             };
-            // Default visible columns
-            _visibleColumnKeys = new List<string> { "Name", "Description", "Status" };
+            // Default visible columns adjusted
+            _visibleColumnKeys = new List<string> { "Name", "Description", "AdminState", "OperationalState" };
         }
 
         private void SetupListViewColumns()
@@ -89,51 +100,128 @@ namespace NetworkManagerAppModern
 
             foreach (string key in _visibleColumnKeys)
             {
-                // Find the column definition by key
                 ColumnDefinition colDef = _allColumnDefinitions.FirstOrDefault(cd => cd.Key == key);
-                // FirstOrDefault returns default(ColumnDefinition) if not found, check Key against null/empty
                 if (!string.IsNullOrEmpty(colDef.Key))
                 {
+                    // Temporarily change the ValueGetter type in ColumnDefinition for this to compile
+                    // This part of ColumnDefinition needs to be generic or use object.
+                    // For now, this will cause a compile error which I'll fix by adjusting ColumnDefinition.
                     listViewNetworkInterfaces.Columns.Add(colDef.HeaderText, colDef.DefaultWidth);
                 }
             }
         }
 
-        private void PopulateNetworkInterfaces()
+        private List<SimpleNetInterfaceInfo> FetchInterfacesViaNetsh()
         {
-            SetupListViewColumns(); // Ensure columns are set up based on _visibleColumnKeys
-            listViewNetworkInterfaces.Items.Clear();
-
-            if (_visibleColumnKeys == null || !_visibleColumnKeys.Any() || _allColumnDefinitions == null)
+            var interfaces = new List<SimpleNetInterfaceInfo>();
+            ProcessStartInfo psi = new ProcessStartInfo("netsh", "interface show interface")
             {
-                // No columns to display or definitions are missing
-                return;
-            }
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = System.Text.Encoding.Default // Or UTF8, check netsh output encoding
+            };
 
             try
             {
-                NetworkInterface[] adapters = NetworkInterface.GetAllNetworkInterfaces();
-                foreach (NetworkInterface adapter in adapters)
+                using (Process? process = Process.Start(psi))
                 {
-                    ListViewItem? item = null;
-                    // First visible column's value for the main item text
-                    ColumnDefinition firstColDef = _allColumnDefinitions.First(cd => cd.Key == _visibleColumnKeys.First());
-                    item = new ListViewItem(firstColDef.ValueGetter(adapter));
+                    if (process == null) return interfaces;
 
-                    // Add sub-items for the rest of the visible columns
-                    for (int i = 1; i < _visibleColumnKeys.Count; i++)
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+
+                    // Basic parser for netsh output
+                    // Example output:
+                    // Admin State    State          Type             Interface Name
+                    // -------------------------------------------------------------------------
+                    // Enabled        Connected      Dedicated        Ethernet
+                    // Disabled       Disconnected   Dedicated        Wi-Fi 2
+                    // Enabled        Disconnected   Dedicated        Bluetooth Network Connection
+
+                    var lines = output.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+                    bool dataStarted = false;
+                    foreach (var line in lines)
                     {
-                        ColumnDefinition colDef = _allColumnDefinitions.First(cd => cd.Key == _visibleColumnKeys[i]);
-                        item.SubItems.Add(colDef.ValueGetter(adapter));
-                    }
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+                        if (line.Trim().StartsWith("---"))
+                        {
+                            dataStarted = true;
+                            continue;
+                        }
+                        if (!dataStarted || line.Trim().StartsWith("Admin State")) continue; // Skip header line itself
 
-                    item.Tag = adapter; // Store the full adapter object for later use
-                    listViewNetworkInterfaces.Items.Add(item);
+                        // This regex is a bit fragile and assumes consistent spacing / column order.
+                        // Columns: Admin State, State, Type, Interface Name
+                        // A more robust parser would look for fixed column start/end or use more specific regex.
+                        var match = Regex.Match(line, @"^(?<admin>\S+)\s+(?<state>\S+)\s+(?<type>\S+)\s+(?<name>.+)$");
+                        if (match.Success)
+                        {
+                            interfaces.Add(new SimpleNetInterfaceInfo
+                            {
+                                AdminState = match.Groups["admin"].Value.Trim(),
+                                OperationalState = match.Groups["state"].Value.Trim(),
+                                // Type = match.Groups["type"].Value.Trim(), // 'Type' from this command is less useful than NetworkInterfaceType
+                                Name = match.Groups["name"].Value.Trim()
+                            });
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error fetching network interfaces: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"Error fetching interfaces via netsh: {ex.Message}", "Netsh Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            return interfaces;
+        }
+
+
+        private void PopulateNetworkInterfaces()
+        {
+            SetupListViewColumns();
+            listViewNetworkInterfaces.Items.Clear();
+
+            List<SimpleNetInterfaceInfo> netshInterfaces = FetchInterfacesViaNetsh();
+
+            // Optional: Get richer data from NetworkInterface.GetAllNetworkInterfaces() and merge
+            // For simplicity now, we'll primarily use what netsh gives for consistent listing
+            Dictionary<string, NetworkInterface> systemInterfaces = new Dictionary<string, NetworkInterface>();
+            try
+            {
+                 systemInterfaces = NetworkInterface.GetAllNetworkInterfaces()
+                                           .Where(ni => !string.IsNullOrEmpty(ni.Name))
+                                           .GroupBy(ni => ni.Name) // Handle potential duplicate names, take first
+                                           .ToDictionary(g => g.Key, g => g.First());
+            }
+            catch (Exception ex) {
+                 System.Diagnostics.Debug.WriteLine($"Error getting system interfaces: {ex.Message}");
+            }
+
+
+            if (_visibleColumnKeys == null || !_visibleColumnKeys.Any() || _allColumnDefinitions == null) return;
+
+            foreach (var netshInfo in netshInterfaces)
+            {
+                // Try to find matching system interface for richer details
+                if (systemInterfaces.TryGetValue(netshInfo.Name, out NetworkInterface? systemAdapter))
+                {
+                    netshInfo.Description = systemAdapter.Description;
+                    netshInfo.Type = systemAdapter.NetworkInterfaceType.ToString();
+                    netshInfo.Id = systemAdapter.Id;
+                }
+
+                ListViewItem item;
+                ColumnDefinition firstColDef = _allColumnDefinitions.First(cd => cd.Key == _visibleColumnKeys.First());
+                item = new ListViewItem(firstColDef.ValueGetter(netshInfo));
+
+                for (int i = 1; i < _visibleColumnKeys.Count; i++)
+                {
+                    ColumnDefinition colDef = _allColumnDefinitions.First(cd => cd.Key == _visibleColumnKeys[i]);
+                    item.SubItems.Add(colDef.ValueGetter(netshInfo));
+                }
+
+                item.Tag = netshInfo.Name; // Store the NAME from netsh, as this is what 'set interface' uses
+                listViewNetworkInterfaces.Items.Add(item);
             }
         }
 
@@ -141,8 +229,11 @@ namespace NetworkManagerAppModern
         {
             if (_allColumnDefinitions == null || _visibleColumnKeys == null) return;
 
+            // The ValueGetter in ColumnDefinition now expects SimpleNetInterfaceInfo
+            // So, the Select method for ColumnSelectionForm needs to reflect this.
+            // For now, we pass keys as before.
             List<string> allColumnKeys = _allColumnDefinitions.Select(cd => cd.Key).ToList();
-            List<string> currentlyVisibleKeys = new List<string>(_visibleColumnKeys); // Pass a copy
+            List<string> currentlyVisibleKeys = new List<string>(_visibleColumnKeys);
 
             using (ColumnSelectionForm colForm = new ColumnSelectionForm(allColumnKeys, currentlyVisibleKeys))
             {
@@ -187,20 +278,16 @@ namespace NetworkManagerAppModern
 
             foreach (ListViewItem selectedItem in listViewNetworkInterfaces.SelectedItems)
             {
-                if (selectedItem.Tag is NetworkInterface adapter)
+                // The Tag now stores the interface name (string) as recognized by netsh
+                if (selectedItem.Tag is string interfaceName && !string.IsNullOrEmpty(interfaceName))
                 {
-                    try
-                    {
-                        // Reverting to use adapter.Name as per latest findings from manual testing
-                        string interfaceName = adapter.Name;
-                        System.Diagnostics.Debug.WriteLine($"Attempting to {(enable ? "enable" : "disable")} interface using Name: '{interfaceName}' (Desc: '{adapter.Description}')");
-                        ExecuteNetshCommandByName(interfaceName, enable);
-                    }
-                    catch (Exception ex)
-                    {
-                        // Catch any other potential errors during property access or preparation
-                        MessageBox.Show($"An unexpected error occurred while preparing to change state for '{adapter.Name}': {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
+                    System.Diagnostics.Debug.WriteLine($"Attempting to {(enable ? "enable" : "disable")} interface using Name from Tag: '{interfaceName}'");
+                    ExecuteNetshCommandByName(interfaceName, enable);
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"Skipping item with invalid Tag: {selectedItem.Tag}");
+                    // Optionally, inform the user if an item was unexpectedly untaggable or had wrong tag type
                 }
             }
             // Refresh the list once after all operations are attempted
