@@ -44,20 +44,28 @@ namespace NetworkManagerAppModern
     {
         private List<ColumnDefinition> _allColumnDefinitions;
         private List<string> _visibleColumnKeys;
+        private bool _isExiting = false; // Flag to allow proper exit
 
         public Form1()
         {
             InitializeComponent();
             InitializeColumnData();
 
+            // Wire up FormClosing event
+            this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
+
             // Icon Loading
             try
             {
-                 throw new NotImplementedException("Custom icon resource loading not yet fully implemented. Using fallback.");
+                // Attempt to load the custom icon from project resources.
+                // Make sure you've added an icon named 'appicon' to your project's Resources.resx
+                // (Project > Properties > Resources > Add Resource > Add Existing File...)
+                this.notifyIcon1.Icon = Properties.Resources.appicon;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Custom icon loading failed: {ex.Message}. Using fallback system icon.");
+                System.Diagnostics.Debug.WriteLine($"Custom icon 'appicon' failed to load: {ex.Message}. Using fallback system icon.");
+                // Fallback to a standard system icon if the custom one isn't found or fails to load
                 this.notifyIcon1.Icon = SystemIcons.Application;
             }
             this.notifyIcon1.Visible = true;
@@ -369,12 +377,26 @@ namespace NetworkManagerAppModern
 
         private void ExitMenuItem_Click(object? sender, EventArgs e)
         {
+            _isExiting = true; // Signal that we are intentionally exiting
             if (notifyIcon1 != null)
             {
-                notifyIcon1.Visible = false; // Hide icon before disposing
-                notifyIcon1.Dispose(); // Release resources used by the icon
+                notifyIcon1.Visible = false;
+                notifyIcon1.Dispose();
             }
             Application.Exit();
+        }
+
+        private void Form1_FormClosing(object? sender, FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing && !_isExiting)
+            {
+                e.Cancel = true; // Cancel the actual closing operation
+                this.Hide();     // Hide the form
+                this.ShowInTaskbar = false; // Optional: remove from taskbar
+                // Optionally, show a balloon tip from the tray icon
+                // notifyIcon1.ShowBalloonTip(1000, "Application Minimized", "Network Manager is running in the background.", ToolTipIcon.Info);
+            }
+            // If _isExiting is true, or if it's not UserClosing (e.g. Windows shutting down), allow the close
         }
 
         private void ToggleFormVisibility()
@@ -386,10 +408,15 @@ namespace NetworkManagerAppModern
             }
             else
             {
-                this.Show();
-                this.WindowState = FormWindowState.Normal;
-                this.ShowInTaskbar = true;
-                this.Activate();
+                // Ensure the window is in a normal state before showing
+                if (this.WindowState == FormWindowState.Minimized)
+                {
+                    this.WindowState = FormWindowState.Normal;
+                }
+                this.Show(); // Make the form visible
+                this.ShowInTaskbar = true; // Ensure it's in the taskbar
+                this.Activate();         // Attempt to give it focus
+                this.BringToFront();     // Ensure it's on top of other windows
             }
         }
     }
