@@ -45,7 +45,16 @@ namespace NetworkManagerAppModern
         private List<ColumnDefinition> _allColumnDefinitions;
         private List<string> _visibleColumnKeys;
         private bool _isExiting = false; // Flag to allow proper exit
-        private System.Windows.Forms.Timer _networkRefreshTimer;
+
+        // Timer for delayed refresh after network change event
+        private System.Windows.Forms.Timer _initialRefreshDelayTimer;
+
+        // Polling mechanism members
+        private System.Windows.Forms.Timer _pollingTimer;
+        private Dictionary<string, DateTime> _interfacesToPoll; // Key: Interface Name, Value: Poll Start Time
+        private List<SimpleNetInterfaceInfo> _lastKnownInterfaces; // Stores the last complete list
+        private const int POLLING_INTERVAL_MS = 500;
+        private const int POLLING_TIMEOUT_SECONDS = 5;
 
         public Form1()
         {
@@ -86,16 +95,167 @@ namespace NetworkManagerAppModern
             // Register for network change notifications
             NetworkChange.NetworkAddressChanged += new NetworkAddressChangedEventHandler(AddressChangedCallback);
 
-            // Initialize the refresh timer
-            _networkRefreshTimer = new System.Windows.Forms.Timer();
-            _networkRefreshTimer.Interval = 750; // 750ms delay, adjust as needed
-            _networkRefreshTimer.Tick += NetworkRefreshTimer_Tick;
+            // Initialize the initial delay timer
+            _initialRefreshDelayTimer = new System.Windows.Forms.Timer();
+            _initialRefreshDelayTimer.Interval = 250; // Shorter initial delay, polling will follow
+            _initialRefreshDelayTimer.Tick += InitialRefreshDelayTimer_Tick;
+
+            // Initialize polling mechanism members
+            _interfacesToPoll = new Dictionary<string, DateTime>();
+            _lastKnownInterfaces = new List<SimpleNetInterfaceInfo>();
+            _pollingTimer = new System.Windows.Forms.Timer();
+            _pollingTimer.Interval = POLLING_INTERVAL_MS;
+            _pollingTimer.Tick += PollingTimer_Tick;
         }
 
-        private void NetworkRefreshTimer_Tick(object? sender, EventArgs e)
+        private void InitialRefreshDelayTimer_Tick(object? sender, EventArgs e)
         {
-            _networkRefreshTimer.Stop(); // Ensure it only runs once per trigger
+            _initialRefreshDelayTimer.Stop(); // Ensure it only runs once per trigger
+            // Instead of directly populating, decide if polling is needed or just refresh.
+            // For now, let's assume we always try to populate and then check for polling.
+            // This will be refined. The main goal is to trigger PopulateNetworkInterfaces
+            // which will then determine if polling is necessary based on state changes.
             PopulateNetworkInterfaces();
+        }
+
+        private void PollingTimer_Tick(object? sender, EventArgs e)
+        {
+            CheckPolledInterfaces();
+        }
+
+        private SimpleNetInterfaceInfo? FetchSingleInterfaceInfo(string interfaceName)
+        {
+            // Quotes around interfaceName are important if it contains spaces
+            ProcessStartInfo psi = new ProcessStartInfo("netsh", $"interface show interface name=\"{interfaceName}\"")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = System.Text.Encoding.Default
+            };
+
+            try
+            {
+                using (Process? process = Process.Start(psi))
+                {
+                    if (process == null) return null;
+
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+
+                    var lines = output.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+                    bool dataStarted = false;
+                    foreach (var line in lines)
+                    {
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+                        if (line.Trim().StartsWith("---"))
+                        {
+                            dataStarted = true;
+                            continue;
+                        }
+                        if (!dataStarted || line.Trim().StartsWith("Admin State")) continue;
+
+                        var match = Regex.Match(line, @"^(?<admin>\S+)\s+(?<state>\S+)\s+(?<type>\S+)\s+(?<name_col>.+)$");
+                        if (match.Success)
+                        {
+                            // Ensure the name matches, as "name=" filter might be partial or netsh might return related items.
+                            // However, for "show interface name='X'", it should be quite specific.
+                            // For safety, we could check match.Groups["name_col"].Value.Trim() == interfaceName if issues arise.
+                            return new SimpleNetInterfaceInfo
+                            {
+                                AdminState = match.Groups["admin"].Value.Trim(),
+                                OperationalState = match.Groups["state"].Value.Trim(),
+                                Name = match.Groups["name_col"].Value.Trim() // Use the name reported by netsh
+                            };
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error fetching single interface info for '{interfaceName}' via netsh: {ex.Message}", "Netsh Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            return null; // Not found or error
+        }
+
+        private void CheckPolledInterfaces()
+        {
+            if (!_interfacesToPoll.Any())
+            {
+                _pollingTimer.Stop();
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"Checking polled interfaces: {string.Join(", ", _interfacesToPoll.Keys)}");
+
+            List<string> completedPollingInterfaces = new List<string>();
+
+            foreach (var entry in _interfacesToPoll.ToList()) // ToList to allow modification during iteration
+            {
+                string interfaceName = entry.Key;
+                DateTime pollStartTime = entry.Value;
+
+                SimpleNetInterfaceInfo? currentInfo = FetchSingleInterfaceInfo(interfaceName);
+
+                bool stopPollingThisInterface = false;
+
+                if (currentInfo != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Polling {interfaceName}: Current state {currentInfo.AdminState}/{currentInfo.OperationalState}");
+                    if (currentInfo.AdminState.Equals("Enabled", StringComparison.OrdinalIgnoreCase) &&
+                        (currentInfo.OperationalState.Equals("Connected", StringComparison.OrdinalIgnoreCase) ||
+                         currentInfo.OperationalState.Equals("Disconnected", StringComparison.OrdinalIgnoreCase) ||
+                         currentInfo.OperationalState.Equals("Non-operational", StringComparison.OrdinalIgnoreCase) || // Add other stable states
+                         currentInfo.OperationalState.Equals("Operational", StringComparison.OrdinalIgnoreCase) // Generic for some VPNs
+                         ))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} confirmed as Enabled and in a stable operational state.");
+                        stopPollingThisInterface = true;
+                    }
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} no longer found by netsh during poll.");
+                    // Interface disappeared, might have been a transient one or renamed. Stop polling for it.
+                    stopPollingThisInterface = true;
+                }
+
+                if (!stopPollingThisInterface && (DateTime.UtcNow - pollStartTime).TotalSeconds > POLLING_TIMEOUT_SECONDS)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Polling for {interfaceName} timed out.");
+                    stopPollingThisInterface = true;
+                }
+
+                if (stopPollingThisInterface)
+                {
+                    completedPollingInterfaces.Add(interfaceName);
+                }
+            }
+
+            bool refreshNeeded = false;
+            foreach (string interfaceName in completedPollingInterfaces)
+            {
+                _interfacesToPoll.Remove(interfaceName);
+                refreshNeeded = true; // At least one interface finished polling
+                System.Diagnostics.Debug.WriteLine($"Finished polling for {interfaceName}.");
+            }
+
+            if (!_interfacesToPoll.Any())
+            {
+                _pollingTimer.Stop();
+                System.Diagnostics.Debug.WriteLine("All polling finished.");
+                // If all polling is done, a final refresh is needed.
+                refreshNeeded = true;
+            }
+
+            if(refreshNeeded)
+            {
+                 // Trigger a full UI refresh.
+                 // Need to ensure this is called on UI thread if PollingTimer_Tick isn't guaranteed to be.
+                 // System.Windows.Forms.Timer ticks on the UI thread, so direct call is okay.
+                System.Diagnostics.Debug.WriteLine("Polling tick indicates refresh needed.");
+                PopulateNetworkInterfaces();
+            }
         }
 
         private void AddressChangedCallback(object? sender, EventArgs e)
@@ -109,18 +269,18 @@ namespace NetworkManagerAppModern
             {
                 this.BeginInvoke(new MethodInvoker(() => {
                     // Perform checks on UI thread
-                    if (!this.IsDisposed && this.Handle != IntPtr.Zero && _networkRefreshTimer != null && !_networkRefreshTimer.Enabled)
+                    if (!this.IsDisposed && this.Handle != IntPtr.Zero && _initialRefreshDelayTimer != null && !_initialRefreshDelayTimer.Enabled)
                     {
-                        _networkRefreshTimer.Start();
+                        _initialRefreshDelayTimer.Start();
                     }
                 }));
             }
             else
             {
                 // Already on UI thread, perform checks directly
-                if (!this.IsDisposed && this.Handle != IntPtr.Zero && _networkRefreshTimer != null && !_networkRefreshTimer.Enabled)
+                if (!this.IsDisposed && this.Handle != IntPtr.Zero && _initialRefreshDelayTimer != null && !_initialRefreshDelayTimer.Enabled)
                 {
-                    _networkRefreshTimer.Start();
+                    _initialRefreshDelayTimer.Start();
                 }
             }
         }
@@ -268,6 +428,77 @@ namespace NetworkManagerAppModern
 
             List<SimpleNetInterfaceInfo> netshInterfaces = FetchInterfacesViaNetsh();
 
+            // Check for interfaces that might need polling
+            // This logic is simplified: if polling is already active, let it finish.
+            // A more sophisticated approach might add new transitions to an active polling session.
+            if (_interfacesToPoll.Any())
+            {
+                // If polling is active, this call to PopulateNetworkInterfaces might be from the polling completing.
+                // Or it could be from the initial delay timer, in which case we don't want to overwrite UI yet.
+                // For now, if polling is active, we assume this refresh is the one that should update the UI.
+                // The main check will be to see if we need to START polling.
+            }
+
+            bool shouldStartPolling = false;
+            foreach (var currentInfo in netshInterfaces)
+            {
+                var previousInfo = _lastKnownInterfaces.FirstOrDefault(i => i.Name == currentInfo.Name);
+                if (previousInfo != null)
+                {
+                    // If previously AdminState was "Disabled" and now it's "Enabled" but "Disconnected"
+                    // (or any state that isn't fully "Connected" operationally)
+                    if (previousInfo.AdminState.Equals("Disabled", StringComparison.OrdinalIgnoreCase) &&
+                        currentInfo.AdminState.Equals("Enabled", StringComparison.OrdinalIgnoreCase) &&
+                        !currentInfo.OperationalState.Equals("Connected", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!_interfacesToPoll.ContainsKey(currentInfo.Name))
+                        {
+                            _interfacesToPoll[currentInfo.Name] = DateTime.UtcNow;
+                            shouldStartPolling = true;
+                            System.Diagnostics.Debug.WriteLine($"Interface {currentInfo.Name} marked for polling. From {previousInfo.AdminState}/{previousInfo.OperationalState} to {currentInfo.AdminState}/{currentInfo.OperationalState}");
+                        }
+                    }
+                }
+                else
+                {
+                    // New interface, if it's Enabled but not Connected, could also be a candidate for polling
+                    // if it just appeared after being enabled.
+                    if (currentInfo.AdminState.Equals("Enabled", StringComparison.OrdinalIgnoreCase) &&
+                        !currentInfo.OperationalState.Equals("Connected", StringComparison.OrdinalIgnoreCase) &&
+                        !currentInfo.OperationalState.Equals("Unknown", StringComparison.OrdinalIgnoreCase)) // Assuming "Unknown" is stable
+                    {
+                        // This might be too aggressive for newly discovered interfaces.
+                        // Let's primarily focus on transitions from Disabled.
+                        // Consider adding if it's a common scenario.
+                    }
+                }
+            }
+
+            // If we decided to start polling based on the comparison between current netshInterfaces
+            // and _lastKnownInterfaces, then start the timer.
+            if (shouldStartPolling && !_pollingTimer.Enabled)
+            {
+                _pollingTimer.Start();
+            }
+
+            // If polling is now active (either started now or was already running for other interfaces),
+            // defer the main UI update. The UI will be updated when polling completes.
+            // Also, do NOT update _lastKnownInterfaces yet, as the UI doesn't reflect netshInterfaces yet.
+            if (_interfacesToPoll.Any())
+            {
+                System.Diagnostics.Debug.WriteLine($"Polling active for: {string.Join(", ", _interfacesToPoll.Keys)}. Deferring full UI update.");
+                return; // Defer UI update
+            }
+
+            // If we've reached here, no polling is active or needed for the current state.
+            // Proceed with full UI update and update _lastKnownInterfaces.
+            _lastKnownInterfaces = new List<SimpleNetInterfaceInfo>(netshInterfaces.Select(ni => new SimpleNetInterfaceInfo {
+                Name = ni.Name, AdminState = ni.AdminState, OperationalState = ni.OperationalState,
+                Description = ni.Description, Id = ni.Id, Type = ni.Type
+            }));
+
+
+            // UI Update part:
             // Optional: Get richer data from NetworkInterface.GetAllNetworkInterfaces() and merge
             // For simplicity now, we'll primarily use what netsh gives for consistent listing
             Dictionary<string, NetworkInterface> systemInterfaces = new Dictionary<string, NetworkInterface>();
@@ -480,11 +711,16 @@ namespace NetworkManagerAppModern
             {
                 // Unregister network change notifications
                 NetworkChange.NetworkAddressChanged -= new NetworkAddressChangedEventHandler(AddressChangedCallback);
-                // Dispose the timer
-                if (_networkRefreshTimer != null)
+                // Dispose timers
+                if (_initialRefreshDelayTimer != null)
                 {
-                    _networkRefreshTimer.Stop();
-                    _networkRefreshTimer.Dispose();
+                    _initialRefreshDelayTimer.Stop();
+                    _initialRefreshDelayTimer.Dispose();
+                }
+                if (_pollingTimer != null)
+                {
+                    _pollingTimer.Stop();
+                    _pollingTimer.Dispose();
                 }
             }
             // If _isExiting is true, or if it's not UserClosing (e.g. Windows shutting down), allow the close
