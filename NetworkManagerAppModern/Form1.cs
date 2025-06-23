@@ -661,19 +661,27 @@ namespace NetworkManagerAppModern
         // Helper method to find the display index of a column based on its key
         private int GetDisplayIndexOfColumnKey(string columnKeyToFind)
         {
-            if (_visibleColumnKeys == null) return -1;
+            if (_visibleColumnKeys == null)
+            {
+                System.Diagnostics.Debug.WriteLine("GetDisplayIndexOfColumnKey: _visibleColumnKeys is null.");
+                return -1;
+            }
+            System.Diagnostics.Debug.WriteLine($"GetDisplayIndexOfColumnKey: Searching for '{columnKeyToFind}' in _visibleColumnKeys: [{string.Join(", ", _visibleColumnKeys)}]");
             for (int i = 0; i < _visibleColumnKeys.Count; i++)
             {
                 if (_visibleColumnKeys[i] == columnKeyToFind)
                 {
+                    System.Diagnostics.Debug.WriteLine($"GetDisplayIndexOfColumnKey: Found '{columnKeyToFind}' at display index {i}.");
                     return i;
                 }
             }
+            System.Diagnostics.Debug.WriteLine($"GetDisplayIndexOfColumnKey: Did not find '{columnKeyToFind}'.");
             return -1;
         }
 
         private void UpdateSelectedInterfaces(bool enable)
         {
+            System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces called with enable: {enable}");
             if (listViewNetworkInterfaces.SelectedItems.Count == 0)
             {
                 MessageBox.Show("Please select one or more network interfaces.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -682,54 +690,81 @@ namespace NetworkManagerAppModern
 
             string targetState = enable ? "Enabled" : "Disabled";
             string pendingStatusText = enable ? "Enabling..." : "Disabling...";
+
+            System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Target state: {targetState}, Pending text: {pendingStatusText}");
             int adminStateDisplayIndex = GetDisplayIndexOfColumnKey("AdminState");
+            System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: adminStateDisplayIndex for 'AdminState' key: {adminStateDisplayIndex}");
+
 
             List<string> interfaceNamesToProcess = new List<string>();
 
             foreach (ListViewItem selectedItem in listViewNetworkInterfaces.SelectedItems)
             {
+                System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Processing selected item with Tag: {selectedItem.Tag}");
                 string currentDisplayedAdminState = string.Empty;
+
                 if (adminStateDisplayIndex != -1)
                 {
                     if (adminStateDisplayIndex == 0)
+                    {
                         currentDisplayedAdminState = selectedItem.Text;
+                        System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Reading AdminState from selectedItem.Text (display index 0): '{currentDisplayedAdminState}'");
+                    }
                     else if (adminStateDisplayIndex > 0 && selectedItem.SubItems.Count > (adminStateDisplayIndex - 1))
+                    {
                         currentDisplayedAdminState = selectedItem.SubItems[adminStateDisplayIndex - 1].Text;
+                        System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Reading AdminState from selectedItem.SubItems[{adminStateDisplayIndex - 1}].Text: '{currentDisplayedAdminState}'");
+                    }
+                    else
+                    {
+                         System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: AdminState column (display index {adminStateDisplayIndex}) not found or SubItems too short for item {selectedItem.Tag}. SubItem count: {selectedItem.SubItems.Count}");
+                    }
+                }
+                else
+                {
+                     System.Diagnostics.Debug.WriteLine("UpdateSelectedInterfaces: AdminState column key not found in visible columns.");
                 }
 
-                // Pre-check: if already in the target state, or pending for it, skip.
-                if (currentDisplayedAdminState.Equals(targetState, StringComparison.OrdinalIgnoreCase) ||
-                    currentDisplayedAdminState.Equals(pendingStatusText, StringComparison.OrdinalIgnoreCase))
+                bool alreadyInTargetState = !string.IsNullOrEmpty(currentDisplayedAdminState) && currentDisplayedAdminState.Equals(targetState, StringComparison.OrdinalIgnoreCase);
+                bool alreadyPending = !string.IsNullOrEmpty(currentDisplayedAdminState) && currentDisplayedAdminState.Equals(pendingStatusText, StringComparison.OrdinalIgnoreCase);
+
+                System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: For item {selectedItem.Tag} - CurrentDisplayedAdminState: '{currentDisplayedAdminState}', TargetState: '{targetState}', IsAlreadyInTargetState: {alreadyInTargetState}, IsAlreadyPending: {alreadyPending}");
+
+                if (alreadyInTargetState || alreadyPending)
                 {
                     System.Diagnostics.Debug.WriteLine($"Interface {selectedItem.Tag} is already in or pending '{targetState}' state. Skipping.");
                     continue;
                 }
 
                 selectedItem.ForeColor = SystemColors.GrayText;
-                selectedItem.BackColor = SystemColors.ControlLight; // More prominent feedback for the whole row
+                selectedItem.BackColor = SystemColors.ControlLight;
+                System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Set ForeColor=GrayText, BackColor=ControlLight for item {selectedItem.Tag}");
+
 
                 if (adminStateDisplayIndex != -1)
                 {
                     if (adminStateDisplayIndex == 0)
                     {
                         selectedItem.Text = pendingStatusText;
+                        System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Set selectedItem.Text to '{pendingStatusText}' for item {selectedItem.Tag}");
                     }
                     else if (adminStateDisplayIndex > 0)
                     {
                         if (selectedItem.SubItems.Count > (adminStateDisplayIndex -1) )
                         {
                              selectedItem.SubItems[adminStateDisplayIndex - 1].Text = pendingStatusText;
-                             // To change only cell backcolor, would need OwnerDraw. For now, row color is set.
+                             System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Set selectedItem.SubItems[{adminStateDisplayIndex-1}].Text to '{pendingStatusText}' for item {selectedItem.Tag}");
                         }
                         else
                         {
-                            System.Diagnostics.Debug.WriteLine($"Warning: AdminState column (display index {adminStateDisplayIndex}) not found in SubItems for item {selectedItem.Tag}. SubItem count: {selectedItem.SubItems.Count}");
+                            // This case should have been caught by the read log, but defensive log here too.
+                            System.Diagnostics.Debug.WriteLine($"Warning: AdminState column (display index {adminStateDisplayIndex}) still not found in SubItems for item {selectedItem.Tag} when trying to write. SubItem count: {selectedItem.SubItems.Count}");
                         }
                     }
                 }
                 else
                 {
-                    System.Diagnostics.Debug.WriteLine("Warning: AdminState column is not visible, cannot set pending text for it.");
+                     System.Diagnostics.Debug.WriteLine("Warning: AdminState column is not visible, cannot set pending text for it (this should have been logged before).");
                 }
 
                 if (selectedItem.Tag is string interfaceName && !string.IsNullOrEmpty(interfaceName))
@@ -741,9 +776,6 @@ namespace NetworkManagerAppModern
             if (!interfaceNamesToProcess.Any())
             {
                 System.Diagnostics.Debug.WriteLine("No interfaces needed processing after pre-checks.");
-                // Optional: Revert styling if all items were skipped and some were styled?
-                // For now, if an item was skipped, it wasn't styled. If some were styled and some skipped,
-                // the styled ones will be updated by the eventual refresh.
                 return;
             }
 
