@@ -103,23 +103,24 @@ namespace NetworkManagerAppModern
             // This event can be raised on a different thread.
             // Instead of direct population, start the timer to introduce a delay.
             // This helps ensure that netsh has time to report the updated state.
-            if (!this.IsDisposed && this.Handle != IntPtr.Zero) // Ensure form is still valid
+
+            // We need to marshal the check and the timer start to the UI thread.
+            if (this.InvokeRequired)
             {
-                if (this.InvokeRequired)
-                {
-                    this.BeginInvoke(new MethodInvoker(() => {
-                        if (!_networkRefreshTimer.Enabled)
-                        {
-                            _networkRefreshTimer.Start();
-                        }
-                    }));
-                }
-                else
-                {
-                    if (!_networkRefreshTimer.Enabled)
+                this.BeginInvoke(new MethodInvoker(() => {
+                    // Perform checks on UI thread
+                    if (!this.IsDisposed && this.Handle != IntPtr.Zero && _networkRefreshTimer != null && !_networkRefreshTimer.Enabled)
                     {
                         _networkRefreshTimer.Start();
                     }
+                }));
+            }
+            else
+            {
+                // Already on UI thread, perform checks directly
+                if (!this.IsDisposed && this.Handle != IntPtr.Zero && _networkRefreshTimer != null && !_networkRefreshTimer.Enabled)
+                {
+                    _networkRefreshTimer.Start();
                 }
             }
         }
