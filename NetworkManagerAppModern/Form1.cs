@@ -120,7 +120,7 @@ namespace NetworkManagerAppModern
             // For now, let's assume we always try to populate and then check for polling.
             // This will be refined. The main goal is to trigger PopulateNetworkInterfaces
             // which will then determine if polling is necessary based on state changes.
-            PopulateNetworkInterfaces();
+            PopulateNetworkInterfaces(isManualRefresh: false);
         }
 
         private void PollingTimer_Tick(object? sender, EventArgs e)
@@ -259,7 +259,7 @@ namespace NetworkManagerAppModern
                  // Need to ensure this is called on UI thread if PollingTimer_Tick isn't guaranteed to be.
                  // System.Windows.Forms.Timer ticks on the UI thread, so direct call is okay.
                 System.Diagnostics.Debug.WriteLine("Polling tick indicates refresh needed.");
-                PopulateNetworkInterfaces();
+                PopulateNetworkInterfaces(isManualRefresh: false);
             }
         }
 
@@ -426,7 +426,7 @@ namespace NetworkManagerAppModern
         }
 
 
-        private void PopulateNetworkInterfaces()
+        private void PopulateNetworkInterfaces(bool isManualRefresh = false)
         {
             SetupListViewColumns();
             listViewNetworkInterfaces.Items.Clear();
@@ -489,13 +489,13 @@ namespace NetworkManagerAppModern
             // If polling is now active (either started now or was already running for other interfaces),
             // defer the main UI update. The UI will be updated when polling completes.
             // Also, do NOT update _lastKnownInterfaces yet, as the UI doesn't reflect netshInterfaces yet.
-            if (_interfacesToPoll.Any())
+            if (!isManualRefresh && _interfacesToPoll.Any())
             {
-                System.Diagnostics.Debug.WriteLine($"Polling active for: {string.Join(", ", _interfacesToPoll.Keys)}. Deferring full UI update.");
-                return; // Defer UI update
+                System.Diagnostics.Debug.WriteLine($"Polling active for: {string.Join(", ", _interfacesToPoll.Keys)}. Automatic refresh deferring full UI update.");
+                return; // Defer UI update only if it's an automatic refresh
             }
 
-            // If we've reached here, no polling is active or needed for the current state.
+            // If we've reached here, no polling is active OR it's a manual refresh.
             // Proceed with full UI update and update _lastKnownInterfaces.
             _lastKnownInterfaces = new List<SimpleNetInterfaceInfo>(netshInterfaces.Select(ni => new SimpleNetInterfaceInfo {
                 Name = ni.Name, AdminState = ni.AdminState, OperationalState = ni.OperationalState,
@@ -569,7 +569,7 @@ namespace NetworkManagerAppModern
 
         private void BtnRefreshList_Click(object? sender, EventArgs e)
         {
-            PopulateNetworkInterfaces();
+            PopulateNetworkInterfaces(isManualRefresh: true);
         }
 
         protected override void OnLoad(EventArgs e)
