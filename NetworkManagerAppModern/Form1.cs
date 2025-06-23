@@ -203,8 +203,11 @@ namespace NetworkManagerAppModern
 
         private SimpleNetInterfaceInfo? FetchSingleInterfaceInfo(string interfaceName)
         {
+            string commandArgs = $"interface show interface name=\"{interfaceName}\"";
+            System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Executing 'netsh {commandArgs}'");
+
             // Quotes around interfaceName are important if it contains spaces
-            ProcessStartInfo psi = new ProcessStartInfo("netsh", $"interface show interface name=\"{interfaceName}\"")
+            ProcessStartInfo psi = new ProcessStartInfo("netsh", commandArgs)
             {
                 RedirectStandardOutput = true,
                 UseShellExecute = false,
@@ -216,10 +219,15 @@ namespace NetworkManagerAppModern
             {
                 using (Process? process = Process.Start(psi))
                 {
-                    if (process == null) return null;
+                    if (process == null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Process for '{interfaceName}' failed to start.");
+                        return null;
+                    }
 
                     string output = process.StandardOutput.ReadToEnd();
                     process.WaitForExit();
+                    System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Raw output for '{interfaceName}':\n{output}");
 
                     var lines = output.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
                     bool dataStarted = false;
@@ -231,27 +239,45 @@ namespace NetworkManagerAppModern
                             dataStarted = true;
                             continue;
                         }
-                        if (!dataStarted || line.Trim().StartsWith("Admin State")) continue;
+                        if (!dataStarted || line.Trim().StartsWith("Admin State")) continue; // Skip headers
 
-                        var match = Regex.Match(line, @"^(?<admin>\S+)\s+(?<state>\S+)\s+(?<type>\S+)\s+(?<name_col>.+)$");
+                        // Standardized regex group name to "name"
+                        var match = Regex.Match(line, @"^(?<admin>\S+)\s+(?<state>\S+)\s+(?<type>\S+)\s+(?<name>.+)$");
                         if (match.Success)
                         {
-                            // Ensure the name matches, as "name=" filter might be partial or netsh might return related items.
-                            // However, for "show interface name='X'", it should be quite specific.
-                            // For safety, we could check match.Groups["name_col"].Value.Trim() == interfaceName if issues arise.
-                            return new SimpleNetInterfaceInfo
+                            string reportedName = match.Groups["name"].Value.Trim();
+                            // Important: Check if the name found in the output actually matches the requested interfaceName.
+                            // netsh name filter can sometimes be a substring match or return multiple items if names are similar.
+                            // However, for "interface show interface name="<X>"", it's usually specific.
+                            // Adding this check for robustness.
+                            if (reportedName.Equals(interfaceName, StringComparison.OrdinalIgnoreCase))
                             {
-                                AdminState = match.Groups["admin"].Value.Trim(),
-                                OperationalState = match.Groups["state"].Value.Trim(),
-                                Name = match.Groups["name_col"].Value.Trim() // Use the name reported by netsh
-                            };
+                                System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Matched for '{interfaceName}'. Admin: {match.Groups["admin"].Value.Trim()}, State: {match.Groups["state"].Value.Trim()}");
+                                return new SimpleNetInterfaceInfo
+                                {
+                                    AdminState = match.Groups["admin"].Value.Trim(),
+                                    OperationalState = match.Groups["state"].Value.Trim(),
+                                    Name = reportedName
+                                };
+                            }
+                            else
+                            {
+                                System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Found interface '{reportedName}' but it does not match requested '{interfaceName}'. Skipping.");
+                            }
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: No regex match for line: '{line}'");
                         }
                     }
+                    System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: No matching interface found for '{interfaceName}' after parsing output.");
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error fetching single interface info for '{interfaceName}' via netsh: {ex.Message}", "Netsh Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Exception for '{interfaceName}': {ex.Message}");
+                // Avoid MessageBox here as it can be disruptive during polling. Log instead.
+                // MessageBox.Show($"Error fetching single interface info for '{interfaceName}' via netsh: {ex.Message}", "Netsh Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             return null; // Not found or error
         }
@@ -309,7 +335,29 @@ namespace NetworkManagerAppModern
                 if (stopPollingThisInterface)
                 {
                     completedPollingInterfaces.Add(interfaceName);
-                    System.Diagnostics.Debug.WriteLine($"Marking {interfaceName} to be removed from polling queue.");
+                    System.Diagnostics.Debug.WriteLine($"Marking {interfaceName} to be removed from polling queue (State: {currentInfo?.AdminState}/{currentInfo?.OperationalState}).");
+
+                    // Update _lastKnownInterfaces for this specific interface immediately
+                    // so that the subsequent PopulateNetworkInterfaces doesn't re-add it to poll.
+                    var knownInterface = _lastKnownInterfaces.FirstOrDefault(i => i.Name == interfaceName);
+                    if (knownInterface != null && currentInfo != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Updating _lastKnownInterfaces for {interfaceName} from {knownInterface.AdminState}/{knownInterface.OperationalState} to {currentInfo.AdminState}/{currentInfo.OperationalState}");
+                        knownInterface.AdminState = currentInfo.AdminState;
+                        knownInterface.OperationalState = currentInfo.OperationalState;
+                        // Other properties like Description, Type, ID are not updated here as FetchSingleInterfaceInfo doesn't get them.
+                        // This is fine as AdminState/OperationalState are key for polling decisions.
+                    }
+                    else if (knownInterface == null && currentInfo != null) // Should not happen if it was in _interfacesToPoll
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Warning: {interfaceName} was polled but not in _lastKnownInterfaces. Adding it with state {currentInfo.AdminState}/{currentInfo.OperationalState}");
+                        _lastKnownInterfaces.Add(new SimpleNetInterfaceInfo { Name = currentInfo.Name, AdminState = currentInfo.AdminState, OperationalState = currentInfo.OperationalState });
+                    }
+                    else if (currentInfo == null) // Interface disappeared during poll
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} disappeared during poll. Removing from _lastKnownInterfaces if present.");
+                        _lastKnownInterfaces.RemoveAll(i => i.Name == interfaceName);
+                    }
                 }
             }
 
@@ -318,13 +366,13 @@ namespace NetworkManagerAppModern
             {
                 foreach (string interfaceName in completedPollingInterfaces)
                 {
-                    _interfacesToPoll.Remove(interfaceName);
+                    _interfacesToPoll.Remove(interfaceName); // Remove from the actual polling queue
                     System.Diagnostics.Debug.WriteLine($"Removed {interfaceName} from polling queue.");
                 }
                 refreshDueToCompletionOrTimeout = true;
             }
 
-            if (!_interfacesToPoll.Any() && anInterfaceWasPolledThisTick) // Check anInterfaceWasPolledThisTick to ensure this isn't a tick where the list was already empty
+            if (!_interfacesToPoll.Any() && anInterfaceWasPolledThisTick)
             {
                 _pollingTimer.Stop();
                 System.Diagnostics.Debug.WriteLine("All polling finished, stopping polling timer.");
