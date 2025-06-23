@@ -59,6 +59,11 @@ namespace NetworkManagerAppModern
         public Form1()
         {
             InitializeComponent();
+
+            // Initialize polling-related collections BEFORE first call to PopulateNetworkInterfaces
+            _interfacesToPoll = new Dictionary<string, DateTime>();
+            _lastKnownInterfaces = new List<SimpleNetInterfaceInfo>();
+
             InitializeColumnData();
 
             // Wire up FormClosing event
