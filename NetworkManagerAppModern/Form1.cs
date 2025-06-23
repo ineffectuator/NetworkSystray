@@ -267,9 +267,11 @@ namespace NetworkManagerAppModern
             System.Diagnostics.Debug.WriteLine($"Checking polled interfaces: {string.Join(", ", _interfacesToPoll.Keys)}");
 
             List<string> completedPollingInterfaces = new List<string>();
+            bool anInterfaceWasPolledThisTick = false;
 
             foreach (var entry in _interfacesToPoll.ToList()) // ToList to allow modification during iteration
             {
+                anInterfaceWasPolledThisTick = true;
                 string interfaceName = entry.Key;
                 DateTime pollStartTime = entry.Value;
 
@@ -307,33 +309,40 @@ namespace NetworkManagerAppModern
                 if (stopPollingThisInterface)
                 {
                     completedPollingInterfaces.Add(interfaceName);
+                    System.Diagnostics.Debug.WriteLine($"Marking {interfaceName} to be removed from polling queue.");
                 }
             }
 
-            bool refreshNeeded = false;
-            foreach (string interfaceName in completedPollingInterfaces)
+            bool refreshDueToCompletionOrTimeout = false;
+            if (completedPollingInterfaces.Any())
             {
-                _interfacesToPoll.Remove(interfaceName);
-                refreshNeeded = true; // At least one interface finished polling
-                System.Diagnostics.Debug.WriteLine($"Finished polling for {interfaceName}.");
+                foreach (string interfaceName in completedPollingInterfaces)
+                {
+                    _interfacesToPoll.Remove(interfaceName);
+                    System.Diagnostics.Debug.WriteLine($"Removed {interfaceName} from polling queue.");
+                }
+                refreshDueToCompletionOrTimeout = true;
             }
 
-            if (!_interfacesToPoll.Any())
+            if (!_interfacesToPoll.Any() && anInterfaceWasPolledThisTick) // Check anInterfaceWasPolledThisTick to ensure this isn't a tick where the list was already empty
             {
                 _pollingTimer.Stop();
-                System.Diagnostics.Debug.WriteLine("All polling finished.");
-                // If all polling is done, a final refresh is needed.
-                refreshNeeded = true;
+                System.Diagnostics.Debug.WriteLine("All polling finished, stopping polling timer.");
+                // If all polling is done (and we actually polled something this tick or just finished the last one),
+                // a final refresh is needed.
+                refreshDueToCompletionOrTimeout = true;
             }
 
-            if(refreshNeeded)
+            if(refreshDueToCompletionOrTimeout)
             {
-                 // Trigger a full UI refresh.
-                 // Need to ensure this is called on UI thread if PollingTimer_Tick isn't guaranteed to be.
-                 // System.Windows.Forms.Timer ticks on the UI thread, so direct call is okay.
-                System.Diagnostics.Debug.WriteLine("Polling tick indicates refresh needed.");
+                System.Diagnostics.Debug.WriteLine("Polling action completed for one or more interfaces, or all polling finished. Calling PopulateNetworkInterfaces.");
                 PopulateNetworkInterfaces(isManualRefresh: false);
             }
+            else if (anInterfaceWasPolledThisTick)
+            {
+                System.Diagnostics.Debug.WriteLine("Polling continues for some interfaces, no immediate full refresh from this tick.");
+            }
+            // If no interfaces were polled this tick (e.g. timer ticked but list was empty and it wasn't stopped last time), do nothing.
         }
 
         private void AddressChangedCallback(object? sender, EventArgs e)
@@ -507,6 +516,7 @@ namespace NetworkManagerAppModern
             listViewNetworkInterfaces.Items.Clear();
 
             List<SimpleNetInterfaceInfo> netshInterfaces = FetchInterfacesViaNetsh();
+            System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces (isManualRefresh: {isManualRefresh}): Found {netshInterfaces.Count} interfaces via netsh.");
 
             // Check for interfaces that might need polling
             // This logic is simplified: if polling is already active, let it finish.
