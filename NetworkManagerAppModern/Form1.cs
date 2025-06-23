@@ -523,6 +523,12 @@ namespace NetworkManagerAppModern
 
             System.Diagnostics.Debug.WriteLine($"Proceeding with UI clear and full update. isManualRefresh: {isManualRefresh}, newPollingInitiatedThisCall: {newPollingInitiatedThisCall}, pollsInProgress: {_interfacesToPoll.Count}");
 
+            string? previouslySelectedInterfaceName = null;
+            if (listViewNetworkInterfaces.SelectedItems.Count > 0)
+            {
+                previouslySelectedInterfaceName = listViewNetworkInterfaces.SelectedItems[0].Tag as string;
+            }
+
             SetupListViewColumns();
             listViewNetworkInterfaces.Items.Clear();
 
@@ -593,6 +599,21 @@ namespace NetworkManagerAppModern
                 item.Tag = displayInfo.Name;
                 listViewNetworkInterfaces.Items.Add(item);
             }
+
+            // Restore selection
+            if (!string.IsNullOrEmpty(previouslySelectedInterfaceName))
+            {
+                foreach (ListViewItem item in listViewNetworkInterfaces.Items)
+                {
+                    if (item.Tag is string tagName && tagName == previouslySelectedInterfaceName)
+                    {
+                        item.Selected = true;
+                        item.EnsureVisible();
+                        listViewNetworkInterfaces.Focus(); // Ensure the ListView has focus to show selection
+                        break;
+                    }
+                }
+            }
         }
 
         private void BtnSelectColumns_Click(object? sender, EventArgs e)
@@ -637,6 +658,20 @@ namespace NetworkManagerAppModern
             UpdateSelectedInterfaces(false);
         }
 
+        // Helper method to find the display index of a column based on its key
+        private int GetDisplayIndexOfColumnKey(string columnKeyToFind)
+        {
+            if (_visibleColumnKeys == null) return -1;
+            for (int i = 0; i < _visibleColumnKeys.Count; i++)
+            {
+                if (_visibleColumnKeys[i] == columnKeyToFind)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
         private void UpdateSelectedInterfaces(bool enable)
         {
             if (listViewNetworkInterfaces.SelectedItems.Count == 0)
@@ -645,19 +680,51 @@ namespace NetworkManagerAppModern
                 return;
             }
 
+            string pendingStatusText = enable ? "Enabling..." : "Disabling...";
+            int adminStateDisplayIndex = GetDisplayIndexOfColumnKey("AdminState");
+
+            List<string> interfaceNamesToProcess = new List<string>();
+
             foreach (ListViewItem selectedItem in listViewNetworkInterfaces.SelectedItems)
             {
-                if (selectedItem.Tag is string interfaceName && !string.IsNullOrEmpty(interfaceName))
+                selectedItem.ForeColor = SystemColors.GrayText;
+
+                if (adminStateDisplayIndex != -1) // If "AdminState" column is visible
                 {
-                    System.Diagnostics.Debug.WriteLine($"Attempting to {(enable ? "enable" : "disable")} interface using Name from Tag: '{interfaceName}'");
-                    ExecuteNetshCommandByName(interfaceName, enable);
+                    if (adminStateDisplayIndex == 0)
+                    {
+                        selectedItem.Text = pendingStatusText;
+                    }
+                    else if (adminStateDisplayIndex > 0)
+                    {
+                        if (selectedItem.SubItems.Count > (adminStateDisplayIndex -1) )
+                        {
+                             selectedItem.SubItems[adminStateDisplayIndex - 1].Text = pendingStatusText;
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Warning: AdminState column (display index {adminStateDisplayIndex}) not found in SubItems for item {selectedItem.Tag}. SubItem count: {selectedItem.SubItems.Count}");
+                        }
+                    }
                 }
                 else
                 {
-                    System.Diagnostics.Debug.WriteLine($"Skipping item with invalid Tag: {selectedItem.Tag}");
+                    System.Diagnostics.Debug.WriteLine("Warning: AdminState column is not visible, cannot set pending text for it.");
+                }
+
+                if (selectedItem.Tag is string interfaceName && !string.IsNullOrEmpty(interfaceName))
+                {
+                    interfaceNamesToProcess.Add(interfaceName);
                 }
             }
-            PopulateNetworkInterfaces();
+
+            // Application.DoEvents(); // Optional
+
+            foreach (string interfaceNameToProcess in interfaceNamesToProcess)
+            {
+                System.Diagnostics.Debug.WriteLine($"Attempting to {(enable ? "enable" : "disable")} interface using Name from Tag: '{interfaceNameToProcess}'");
+                ExecuteNetshCommandByName(interfaceNameToProcess, enable);
+            }
         }
 
         private void ExecuteNetshCommandByName(string interfaceName, bool enable)
