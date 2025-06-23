@@ -7,6 +7,7 @@ using System.Collections.Generic; // For List<T>
 using System.Linq; // For LINQ operations
 
 using System.Text.RegularExpressions; // For parsing netsh output
+using System.Management; // For WMI event watcher
 
 namespace NetworkManagerAppModern
 {
@@ -55,6 +56,8 @@ namespace NetworkManagerAppModern
         private List<SimpleNetInterfaceInfo> _lastKnownInterfaces; // Stores the last complete list
         private const int POLLING_INTERVAL_MS = 500;
         private const int POLLING_TIMEOUT_SECONDS = 5;
+
+        private ManagementEventWatcher? _wmiWatcher;
 
         public Form1()
         {
@@ -111,6 +114,76 @@ namespace NetworkManagerAppModern
             _pollingTimer = new System.Windows.Forms.Timer();
             _pollingTimer.Interval = POLLING_INTERVAL_MS;
             _pollingTimer.Tick += PollingTimer_Tick;
+
+            InitializeWmiWatcher();
+        }
+
+        private void InitializeWmiWatcher()
+        {
+            try
+            {
+                WqlEventQuery query = new WqlEventQuery(
+                    "SELECT * FROM __InstanceModificationEvent WITHIN 2 " +
+                    "WHERE TargetInstance ISA 'Win32_NetworkAdapter' AND " +
+                    "TargetInstance.NetConnectionStatus <> PreviousInstance.NetConnectionStatus");
+
+                _wmiWatcher = new ManagementEventWatcher(query);
+                _wmiWatcher.EventArrived += new EventArrivedEventHandler(WmiEventHandler);
+                _wmiWatcher.Start();
+                System.Diagnostics.Debug.WriteLine("WMI Watcher started.");
+            }
+            catch (ManagementException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to initialize WMI watcher: {ex.Message}");
+                // Optionally inform the user, or log this more formally
+                // This can happen due to permissions issues or WMI service problems
+                _wmiWatcher = null; // Ensure it's null if setup failed
+            }
+            catch (Exception ex) // Catch other potential exceptions
+            {
+                System.Diagnostics.Debug.WriteLine($"An unexpected error occurred while initializing WMI watcher: {ex.Message}");
+                _wmiWatcher = null;
+            }
+        }
+
+        private void WmiEventHandler(object sender, EventArrivedEventArgs e)
+        {
+            System.Diagnostics.Debug.WriteLine("WMI Network Adapter event arrived.");
+            // WMI events arrive on a separate thread. We need to marshal UI updates
+            // or operations that affect UI controls (like starting timers that update UI)
+            // to the main UI thread.
+
+            // We can extract details from e.NewEvent["TargetInstance"] if needed,
+            // for example, to get the name of the adapter that changed.
+            // ManagementBaseObject targetInstance = e.NewEvent["TargetInstance"] as ManagementBaseObject;
+            // string adapterName = targetInstance?["Name"]?.ToString();
+            // System.Diagnostics.Debug.WriteLine($"WMI Event for adapter: {adapterName}");
+
+            // For now, any relevant WMI event will trigger our existing refresh logic,
+            // which includes the initial delay timer. This timer helps debounce and
+            // ensures that we don't try to access netsh too rapidly if WMI events
+            // come in quick succession for a single underlying system change.
+
+            if (this.InvokeRequired)
+            {
+                this.BeginInvoke(new MethodInvoker(() => {
+                    // Perform checks on UI thread
+                    if (!this.IsDisposed && this.Handle != IntPtr.Zero && _initialRefreshDelayTimer != null && !_initialRefreshDelayTimer.Enabled)
+                    {
+                        System.Diagnostics.Debug.WriteLine("WMI Event: Starting initial refresh delay timer.");
+                        _initialRefreshDelayTimer.Start();
+                    }
+                }));
+            }
+            else
+            {
+                // Already on UI thread (should not happen for WMI events, but good practice)
+                if (!this.IsDisposed && this.Handle != IntPtr.Zero && _initialRefreshDelayTimer != null && !_initialRefreshDelayTimer.Enabled)
+                {
+                    System.Diagnostics.Debug.WriteLine("WMI Event (already on UI thread): Starting initial refresh delay timer.");
+                    _initialRefreshDelayTimer.Start();
+                }
+            }
         }
 
         private void InitialRefreshDelayTimer_Tick(object? sender, EventArgs e)
@@ -276,6 +349,7 @@ namespace NetworkManagerAppModern
                     // Perform checks on UI thread
                     if (!this.IsDisposed && this.Handle != IntPtr.Zero && _initialRefreshDelayTimer != null && !_initialRefreshDelayTimer.Enabled)
                     {
+                        System.Diagnostics.Debug.WriteLine("NetworkAddressChanged Event: Starting initial refresh delay timer.");
                         _initialRefreshDelayTimer.Start();
                     }
                 }));
@@ -285,6 +359,7 @@ namespace NetworkManagerAppModern
                 // Already on UI thread, perform checks directly
                 if (!this.IsDisposed && this.Handle != IntPtr.Zero && _initialRefreshDelayTimer != null && !_initialRefreshDelayTimer.Enabled)
                 {
+                    System.Diagnostics.Debug.WriteLine("NetworkAddressChanged Event (already on UI thread): Starting initial refresh delay timer.");
                     _initialRefreshDelayTimer.Start();
                 }
             }
@@ -726,6 +801,12 @@ namespace NetworkManagerAppModern
                 {
                     _pollingTimer.Stop();
                     _pollingTimer.Dispose();
+                }
+                if (_wmiWatcher != null)
+                {
+                    _wmiWatcher.Stop();
+                    _wmiWatcher.Dispose();
+                    System.Diagnostics.Debug.WriteLine("WMI Watcher stopped and disposed.");
                 }
             }
             // If _isExiting is true, or if it's not UserClosing (e.g. Windows shutting down), allow the close
