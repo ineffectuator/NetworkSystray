@@ -613,8 +613,19 @@ namespace NetworkManagerAppModern
                         item.SubItems.Add("");
                         continue;
                     }
-                    string subItemText = colDef.ValueGetter(displayInfo);
-                    System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: For item '{displayInfo.Name}', subitem for key='{currentKey}' (display index {i}, subitem index {i-1}) text = '{subItemText}'");
+
+                    string subItemText;
+                    if (currentKey == "AdminState")
+                    {
+                        // Explicitly use displayInfo.AdminState for the AdminState column
+                        subItemText = displayInfo.AdminState;
+                        System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: For item '{displayInfo.Name}', AdminState column using explicit displayInfo.AdminState='{subItemText}' (display index {i}, subitem index {i-1})");
+                    }
+                    else
+                    {
+                        subItemText = colDef.ValueGetter(displayInfo);
+                        System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: For item '{displayInfo.Name}', subitem for key='{currentKey}' (display index {i}, subitem index {i-1}) text = '{subItemText}' (via ValueGetter)");
+                    }
                     item.SubItems.Add(subItemText);
                 }
 
