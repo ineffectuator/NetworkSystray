@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.8.34330.188 # Example VS 2022 version for .NET 8
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetworkManagerAppModern", "NetworkManagerAppModern\NetworkManagerAppModern.csproj", "{A0A2A68A-3485-4687-9F92-22779561671A}" # Generated Project GUID
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A0A2A68A-3485-4687-9F92-22779561671A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A0A2A68A-3485-4687-9F92-22779561671A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A0A2A68A-3485-4687-9F92-22779561671A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A0A2A68A-3485-4687-9F92-22779561671A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {B1B2B0B3-1F8B-4B9A-8C9A-2B5F9731702B} # Generated Solution GUID
+	EndGlobalSection
+EndGlobal
