@@ -261,9 +261,11 @@ namespace NetworkManagerAppModern
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            // Hide the main window on startup
-            this.Visible = false;
-            this.ShowInTaskbar = false; // Prevents it from flashing in the taskbar
+            // Defer hiding until after the form is fully loaded and shown once (helps with first Show() call)
+            this.BeginInvoke(new MethodInvoker(delegate {
+                Hide();
+                ShowInTaskbar = false;
+            }));
         }
 
         private void BtnEnableSelected_Click(object? sender, EventArgs e)
