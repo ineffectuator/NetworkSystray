@@ -7,6 +7,7 @@ using System.Collections.Generic; // For List<T>
 using System.Linq; // For LINQ operations
 
 using System.Text.RegularExpressions; // For parsing netsh output
+using System.Management; // For WMI event watcher
 
 namespace NetworkManagerAppModern
 {
@@ -46,9 +47,26 @@ namespace NetworkManagerAppModern
         private List<string> _visibleColumnKeys;
         private bool _isExiting = false; // Flag to allow proper exit
 
+        // Timer for delayed refresh after network change event
+        private System.Windows.Forms.Timer _initialRefreshDelayTimer;
+
+        // Polling mechanism members
+        private System.Windows.Forms.Timer _pollingTimer;
+        private Dictionary<string, DateTime> _interfacesToPoll; // Key: Interface Name, Value: Poll Start Time
+        private List<SimpleNetInterfaceInfo> _lastKnownInterfaces; // Stores the last complete list
+        private const int POLLING_INTERVAL_MS = 500;
+        private const int POLLING_TIMEOUT_SECONDS = 5;
+
+        private ManagementEventWatcher? _wmiWatcher;
+
         public Form1()
         {
             InitializeComponent();
+
+            // Initialize polling-related collections BEFORE first call to PopulateNetworkInterfaces
+            _interfacesToPoll = new Dictionary<string, DateTime>();
+            _lastKnownInterfaces = new List<SimpleNetInterfaceInfo>();
+
             InitializeColumnData();
 
             // Wire up FormClosing event
@@ -57,15 +75,11 @@ namespace NetworkManagerAppModern
             // Icon Loading
             try
             {
-                // Attempt to load the custom icon from project resources.
-                // Make sure you've added an icon named 'appicon' to your project's Resources.resx
-                // (Project > Properties > Resources > Add Resource > Add Existing File...)
                 this.notifyIcon1.Icon = Properties.Resources.appicon;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Custom icon 'appicon' failed to load: {ex.Message}. Using fallback system icon.");
-                // Fallback to a standard system icon if the custom one isn't found or fails to load
                 this.notifyIcon1.Icon = SystemIcons.Application;
             }
             this.notifyIcon1.Visible = true;
@@ -80,25 +94,324 @@ namespace NetworkManagerAppModern
             this.btnDisableSelected.Click += new System.EventHandler(this.BtnDisableSelected_Click);
             this.btnSelectColumns.Click += new System.EventHandler(this.BtnSelectColumns_Click);
 
-            PopulateNetworkInterfaces();
+            PopulateNetworkInterfaces(); // Initial population
+
+            NetworkChange.NetworkAddressChanged += new NetworkAddressChangedEventHandler(AddressChangedCallback);
+
+            _initialRefreshDelayTimer = new System.Windows.Forms.Timer();
+            _initialRefreshDelayTimer.Interval = 250;
+            _initialRefreshDelayTimer.Tick += InitialRefreshDelayTimer_Tick;
+
+            _pollingTimer = new System.Windows.Forms.Timer();
+            _pollingTimer.Interval = POLLING_INTERVAL_MS;
+            _pollingTimer.Tick += PollingTimer_Tick;
+
+            InitializeWmiWatcher();
+        }
+
+        private void InitializeWmiWatcher()
+        {
+            try
+            {
+                WqlEventQuery query = new WqlEventQuery(
+                    "SELECT * FROM __InstanceModificationEvent WITHIN 2 " +
+                    "WHERE TargetInstance ISA 'Win32_NetworkAdapter' AND " +
+                    "TargetInstance.NetConnectionStatus <> PreviousInstance.NetConnectionStatus");
+
+                _wmiWatcher = new ManagementEventWatcher(query);
+                _wmiWatcher.EventArrived += new EventArrivedEventHandler(WmiEventHandler);
+                _wmiWatcher.Start();
+                System.Diagnostics.Debug.WriteLine("WMI Watcher started.");
+            }
+            catch (ManagementException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to initialize WMI watcher: {ex.Message}");
+                _wmiWatcher = null;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"An unexpected error occurred while initializing WMI watcher: {ex.Message}");
+                _wmiWatcher = null;
+            }
+        }
+
+        private void WmiEventHandler(object sender, EventArrivedEventArgs e)
+        {
+            System.Diagnostics.Debug.WriteLine("WMI Network Adapter event arrived.");
+            if (this.InvokeRequired)
+            {
+                this.BeginInvoke(new MethodInvoker(() => {
+                    if (!this.IsDisposed && this.Handle != IntPtr.Zero && _initialRefreshDelayTimer != null && !_initialRefreshDelayTimer.Enabled)
+                    {
+                        System.Diagnostics.Debug.WriteLine("WMI Event: Starting initial refresh delay timer.");
+                        _initialRefreshDelayTimer.Start();
+                    }
+                }));
+            }
+            else
+            {
+                if (!this.IsDisposed && this.Handle != IntPtr.Zero && _initialRefreshDelayTimer != null && !_initialRefreshDelayTimer.Enabled)
+                {
+                    System.Diagnostics.Debug.WriteLine("WMI Event (already on UI thread): Starting initial refresh delay timer.");
+                    _initialRefreshDelayTimer.Start();
+                }
+            }
+        }
+
+        private void InitialRefreshDelayTimer_Tick(object? sender, EventArgs e)
+        {
+            _initialRefreshDelayTimer.Stop();
+            PopulateNetworkInterfaces(isManualRefresh: false);
+        }
+
+        private void PollingTimer_Tick(object? sender, EventArgs e)
+        {
+            CheckPolledInterfaces();
+        }
+
+        private SimpleNetInterfaceInfo? FetchSingleInterfaceInfo(string interfaceName)
+        {
+            string commandArgs = $"interface show interface name=\"{interfaceName}\"";
+            System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Executing 'netsh {commandArgs}'");
+
+            ProcessStartInfo psi = new ProcessStartInfo("netsh", commandArgs)
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = System.Text.Encoding.Default
+            };
+
+            try
+            {
+                using (Process? process = Process.Start(psi))
+                {
+                    if (process == null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Process for '{interfaceName}' failed to start.");
+                        return null;
+                    }
+
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+                    System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Raw output for '{interfaceName}':\n{output}");
+
+                    var lines = output.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+                    bool dataStarted = false;
+                    foreach (var line in lines)
+                    {
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+                        if (line.Trim().StartsWith("---"))
+                        {
+                            dataStarted = true;
+                            continue;
+                        }
+                        if (!dataStarted || line.Trim().StartsWith("Admin State")) continue;
+
+                        var match = Regex.Match(line, @"^(?<admin>\S+)\s+(?<state>\S+)\s+(?<type>\S+)\s+(?<name>.+)$");
+                        if (match.Success)
+                        {
+                            string reportedName = match.Groups["name"].Value.Trim();
+                            if (reportedName.Equals(interfaceName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Matched for '{interfaceName}'. Admin: {match.Groups["admin"].Value.Trim()}, State: {match.Groups["state"].Value.Trim()}");
+                                return new SimpleNetInterfaceInfo
+                                {
+                                    AdminState = match.Groups["admin"].Value.Trim(),
+                                    OperationalState = match.Groups["state"].Value.Trim(),
+                                    Name = reportedName
+                                };
+                            }
+                            else
+                            {
+                                System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Found interface '{reportedName}' but it does not match requested '{interfaceName}'. Skipping.");
+                            }
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: No regex match for line: '{line}'");
+                        }
+                    }
+                    System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: No matching interface found for '{interfaceName}' after parsing output.");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"FetchSingleInterfaceInfo: Exception for '{interfaceName}': {ex.Message}");
+            }
+            return null;
+        }
+
+        private void CheckPolledInterfaces()
+        {
+            if (!_interfacesToPoll.Any())
+            {
+                _pollingTimer.Stop();
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"Checking polled interfaces: {string.Join(", ", _interfacesToPoll.Keys)}");
+
+            List<string> completedPollingInterfaces = new List<string>();
+            bool anInterfaceWasPolledThisTick = false;
+
+            foreach (var entry in _interfacesToPoll.ToList())
+            {
+                anInterfaceWasPolledThisTick = true;
+                string interfaceName = entry.Key;
+                DateTime pollStartTime = entry.Value;
+
+                SimpleNetInterfaceInfo? currentInfo = FetchSingleInterfaceInfo(interfaceName);
+
+                bool stopPollingThisInterface = false;
+
+                if (currentInfo != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Polling {interfaceName}: Current state {currentInfo.AdminState}/{currentInfo.OperationalState}");
+                    if (currentInfo.AdminState.Equals("Enabled", StringComparison.OrdinalIgnoreCase) &&
+                        (currentInfo.OperationalState.Equals("Connected", StringComparison.OrdinalIgnoreCase) ||
+                         currentInfo.OperationalState.Equals("Disconnected", StringComparison.OrdinalIgnoreCase) ||
+                         currentInfo.OperationalState.Equals("Non-operational", StringComparison.OrdinalIgnoreCase) ||
+                         currentInfo.OperationalState.Equals("Operational", StringComparison.OrdinalIgnoreCase)
+                         ))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} confirmed as Enabled and in a stable operational state.");
+                        stopPollingThisInterface = true;
+                    }
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} no longer found by netsh during poll.");
+                    stopPollingThisInterface = true;
+                }
+
+                if (!stopPollingThisInterface && (DateTime.UtcNow - pollStartTime).TotalSeconds > POLLING_TIMEOUT_SECONDS)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Polling for {interfaceName} timed out.");
+                    stopPollingThisInterface = true;
+                }
+
+                if (stopPollingThisInterface)
+                {
+                    completedPollingInterfaces.Add(interfaceName);
+                    System.Diagnostics.Debug.WriteLine($"Marking {interfaceName} to be removed from polling queue (State: {currentInfo?.AdminState}/{currentInfo?.OperationalState}).");
+
+                    var knownInterface = _lastKnownInterfaces.FirstOrDefault(i => i.Name == interfaceName);
+                    if (knownInterface != null && currentInfo != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Updating _lastKnownInterfaces for {interfaceName} from {knownInterface.AdminState}/{knownInterface.OperationalState} to {currentInfo.AdminState}/{currentInfo.OperationalState}");
+                        knownInterface.AdminState = currentInfo.AdminState;
+                        knownInterface.OperationalState = currentInfo.OperationalState;
+                    }
+                    else if (knownInterface == null && currentInfo != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Warning: {interfaceName} was polled but not in _lastKnownInterfaces. Adding it with state {currentInfo.AdminState}/{currentInfo.OperationalState}");
+                        _lastKnownInterfaces.Add(new SimpleNetInterfaceInfo { Name = currentInfo.Name, AdminState = currentInfo.AdminState, OperationalState = currentInfo.OperationalState });
+                    }
+                    else if (currentInfo == null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} disappeared during poll. Removing from _lastKnownInterfaces if present.");
+                        _lastKnownInterfaces.RemoveAll(i => i.Name == interfaceName);
+                    }
+                }
+            }
+
+            bool refreshDueToCompletionOrTimeout = false;
+            if (completedPollingInterfaces.Any())
+            {
+                foreach (string interfaceName in completedPollingInterfaces)
+                {
+                    _interfacesToPoll.Remove(interfaceName);
+                    System.Diagnostics.Debug.WriteLine($"Removed {interfaceName} from polling queue.");
+                }
+                refreshDueToCompletionOrTimeout = true;
+            }
+
+            if (!_interfacesToPoll.Any() && anInterfaceWasPolledThisTick)
+            {
+                _pollingTimer.Stop();
+                System.Diagnostics.Debug.WriteLine("All polling finished, stopping polling timer.");
+                refreshDueToCompletionOrTimeout = true;
+            }
+
+            if(refreshDueToCompletionOrTimeout)
+            {
+                System.Diagnostics.Debug.WriteLine("Polling action completed for one or more interfaces, or all polling finished. Calling PopulateNetworkInterfaces.");
+                PopulateNetworkInterfaces(isManualRefresh: false);
+            }
+            else if (anInterfaceWasPolledThisTick)
+            {
+                System.Diagnostics.Debug.WriteLine("Polling continues for some interfaces, no immediate full refresh from this tick.");
+            }
+        }
+
+        private void AddressChangedCallback(object? sender, EventArgs e)
+        {
+            if (this.InvokeRequired)
+            {
+                this.BeginInvoke(new MethodInvoker(() => {
+                    if (!this.IsDisposed && this.Handle != IntPtr.Zero && _initialRefreshDelayTimer != null && !_initialRefreshDelayTimer.Enabled)
+                    {
+                        System.Diagnostics.Debug.WriteLine("NetworkAddressChanged Event: Starting initial refresh delay timer.");
+                        _initialRefreshDelayTimer.Start();
+                    }
+                }));
+            }
+            else
+            {
+                if (!this.IsDisposed && this.Handle != IntPtr.Zero && _initialRefreshDelayTimer != null && !_initialRefreshDelayTimer.Enabled)
+                {
+                    System.Diagnostics.Debug.WriteLine("NetworkAddressChanged Event (already on UI thread): Starting initial refresh delay timer.");
+                    _initialRefreshDelayTimer.Start();
+                }
+            }
         }
 
         private void InitializeColumnData()
         {
-            // Columns will now be based on SimpleNetInterfaceInfo primarily
             _allColumnDefinitions = new List<ColumnDefinition>
             {
-                // We use a Func<SimpleNetInterfaceInfo, string> for ValueGetter
                 new ColumnDefinition("Name", "Name", 150, info => info.Name),
                 new ColumnDefinition("AdminState", "Admin State", 100, info => info.AdminState),
                 new ColumnDefinition("OperationalState", "Op. Status", 120, info => info.OperationalState),
                 new ColumnDefinition("Description", "Description", 250, info => info.Description ?? ""),
-                // Optional: Add more if we decide to merge with NetworkInterface objects later
                 new ColumnDefinition("Type", "Type", 100, info => info.Type ?? ""),
                 new ColumnDefinition("ID", "ID", 200, info => info.Id ?? ""),
             };
-            // Default visible columns adjusted
-            _visibleColumnKeys = new List<string> { "Name", "Description", "AdminState", "OperationalState" };
+            LoadColumnSettings();
+        }
+
+        private void LoadColumnSettings()
+        {
+            if (Properties.Settings.Default.VisibleColumnKeys != null && Properties.Settings.Default.VisibleColumnKeys.Count > 0)
+            {
+                _visibleColumnKeys = new List<string>();
+                foreach (string key in Properties.Settings.Default.VisibleColumnKeys)
+                {
+                    _visibleColumnKeys.Add(key);
+                }
+            }
+            else
+            {
+                _visibleColumnKeys = new List<string> { "Name", "Description", "AdminState", "OperationalState" };
+            }
+        }
+
+        private void SaveColumnSettings()
+        {
+            if (_visibleColumnKeys != null)
+            {
+                if (Properties.Settings.Default.VisibleColumnKeys == null)
+                {
+                    Properties.Settings.Default.VisibleColumnKeys = new System.Collections.Specialized.StringCollection();
+                }
+                else
+                {
+                    Properties.Settings.Default.VisibleColumnKeys.Clear();
+                }
+                Properties.Settings.Default.VisibleColumnKeys.AddRange(_visibleColumnKeys.ToArray());
+                Properties.Settings.Default.Save();
+            }
         }
 
         private void SetupListViewColumns()
@@ -111,9 +424,6 @@ namespace NetworkManagerAppModern
                 ColumnDefinition colDef = _allColumnDefinitions.FirstOrDefault(cd => cd.Key == key);
                 if (!string.IsNullOrEmpty(colDef.Key))
                 {
-                    // Temporarily change the ValueGetter type in ColumnDefinition for this to compile
-                    // This part of ColumnDefinition needs to be generic or use object.
-                    // For now, this will cause a compile error which I'll fix by adjusting ColumnDefinition.
                     listViewNetworkInterfaces.Columns.Add(colDef.HeaderText, colDef.DefaultWidth);
                 }
             }
@@ -127,7 +437,7 @@ namespace NetworkManagerAppModern
                 RedirectStandardOutput = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                StandardOutputEncoding = System.Text.Encoding.Default // Or UTF8, check netsh output encoding
+                StandardOutputEncoding = System.Text.Encoding.Default
             };
 
             try
@@ -139,14 +449,6 @@ namespace NetworkManagerAppModern
                     string output = process.StandardOutput.ReadToEnd();
                     process.WaitForExit();
 
-                    // Basic parser for netsh output
-                    // Example output:
-                    // Admin State    State          Type             Interface Name
-                    // -------------------------------------------------------------------------
-                    // Enabled        Connected      Dedicated        Ethernet
-                    // Disabled       Disconnected   Dedicated        Wi-Fi 2
-                    // Enabled        Disconnected   Dedicated        Bluetooth Network Connection
-
                     var lines = output.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
                     bool dataStarted = false;
                     foreach (var line in lines)
@@ -157,21 +459,29 @@ namespace NetworkManagerAppModern
                             dataStarted = true;
                             continue;
                         }
-                        if (!dataStarted || line.Trim().StartsWith("Admin State")) continue; // Skip header line itself
+                        if (!dataStarted || line.Trim().StartsWith("Admin State")) continue;
 
-                        // This regex is a bit fragile and assumes consistent spacing / column order.
-                        // Columns: Admin State, State, Type, Interface Name
-                        // A more robust parser would look for fixed column start/end or use more specific regex.
                         var match = Regex.Match(line, @"^(?<admin>\S+)\s+(?<state>\S+)\s+(?<type>\S+)\s+(?<name>.+)$");
                         if (match.Success)
                         {
+                            string adminVal = match.Groups["admin"].Value.Trim();
+                            string stateVal = match.Groups["state"].Value.Trim();
+                            string typeVal = match.Groups["type"].Value.Trim();
+                            string nameVal = match.Groups["name"].Value.Trim();
+
+                            System.Diagnostics.Debug.WriteLine($"FetchInterfacesViaNetsh: Parsed Line: Raw='{line}'");
+                            System.Diagnostics.Debug.WriteLine($"  -> Admin='{adminVal}', State='{stateVal}', Type='{typeVal}', Name='{nameVal}'");
+
                             interfaces.Add(new SimpleNetInterfaceInfo
                             {
-                                AdminState = match.Groups["admin"].Value.Trim(),
-                                OperationalState = match.Groups["state"].Value.Trim(),
-                                // Type = match.Groups["type"].Value.Trim(), // 'Type' from this command is less useful than NetworkInterfaceType
-                                Name = match.Groups["name"].Value.Trim()
+                                AdminState = adminVal,
+                                OperationalState = stateVal,
+                                Name = nameVal
                             });
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"FetchInterfacesViaNetsh: No regex match for line: '{line}'");
                         }
                     }
                 }
@@ -183,53 +493,176 @@ namespace NetworkManagerAppModern
             return interfaces;
         }
 
-
-        private void PopulateNetworkInterfaces()
+        private void PopulateNetworkInterfaces(bool isManualRefresh = false)
         {
+            List<SimpleNetInterfaceInfo> netshInterfaces = FetchInterfacesViaNetsh();
+            System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces (isManualRefresh: {isManualRefresh}): Found {netshInterfaces.Count} interfaces via netsh.");
+
+            bool newPollingInitiatedThisCall = false;
+            if (!isManualRefresh)
+            {
+                foreach (var currentInfo in netshInterfaces)
+                {
+                    var previousInfo = _lastKnownInterfaces.FirstOrDefault(i => i.Name == currentInfo.Name);
+                    if (previousInfo != null)
+                    {
+                        if (previousInfo.AdminState.Equals("Disabled", StringComparison.OrdinalIgnoreCase) &&
+                            currentInfo.AdminState.Equals("Enabled", StringComparison.OrdinalIgnoreCase) &&
+                            !currentInfo.OperationalState.Equals("Connected", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!_interfacesToPoll.ContainsKey(currentInfo.Name))
+                            {
+                                _interfacesToPoll[currentInfo.Name] = DateTime.UtcNow;
+                                newPollingInitiatedThisCall = true;
+                                System.Diagnostics.Debug.WriteLine($"Interface {currentInfo.Name} marked for polling. From {previousInfo.AdminState}/{previousInfo.OperationalState} to {currentInfo.AdminState}/{currentInfo.OperationalState}");
+                            }
+                        }
+                    }
+                }
+
+                if (newPollingInitiatedThisCall && !_pollingTimer.Enabled)
+                {
+                    System.Diagnostics.Debug.WriteLine("New polling initiated, ensuring polling timer is started.");
+                    _pollingTimer.Start();
+                }
+            }
+
+            if (newPollingInitiatedThisCall && !isManualRefresh)
+            {
+                System.Diagnostics.Debug.WriteLine($"Polling newly initiated for automatic refresh. Deferring UI clear & update. Active polls: {string.Join(", ", _interfacesToPoll.Keys)}");
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"Proceeding with UI clear and full update. isManualRefresh: {isManualRefresh}, newPollingInitiatedThisCall: {newPollingInitiatedThisCall}, pollsInProgress: {_interfacesToPoll.Count}");
+
+            string? previouslySelectedInterfaceName = null;
+            if (listViewNetworkInterfaces.SelectedItems.Count > 0)
+            {
+                previouslySelectedInterfaceName = listViewNetworkInterfaces.SelectedItems[0].Tag as string;
+            }
+
             SetupListViewColumns();
             listViewNetworkInterfaces.Items.Clear();
 
-            List<SimpleNetInterfaceInfo> netshInterfaces = FetchInterfacesViaNetsh();
+            _lastKnownInterfaces = new List<SimpleNetInterfaceInfo>(netshInterfaces.Select(ni => new SimpleNetInterfaceInfo {
+                Name = ni.Name, AdminState = ni.AdminState, OperationalState = ni.OperationalState,
+                Description = ni.Description, Id = ni.Id, Type = ni.Type
+            }));
 
-            // Optional: Get richer data from NetworkInterface.GetAllNetworkInterfaces() and merge
-            // For simplicity now, we'll primarily use what netsh gives for consistent listing
             Dictionary<string, NetworkInterface> systemInterfaces = new Dictionary<string, NetworkInterface>();
             try
             {
-                 systemInterfaces = NetworkInterface.GetAllNetworkInterfaces()
-                                           .Where(ni => !string.IsNullOrEmpty(ni.Name))
-                                           .GroupBy(ni => ni.Name) // Handle potential duplicate names, take first
-                                           .ToDictionary(g => g.Key, g => g.First());
+                    systemInterfaces = NetworkInterface.GetAllNetworkInterfaces()
+                                                .Where(ni => !string.IsNullOrEmpty(ni.Name))
+                                                .GroupBy(ni => ni.Name)
+                                                .ToDictionary(g => g.Key, g => g.First());
             }
             catch (Exception ex) {
-                 System.Diagnostics.Debug.WriteLine($"Error getting system interfaces: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"Error getting system interfaces: {ex.Message}");
             }
 
-
-            if (_visibleColumnKeys == null || !_visibleColumnKeys.Any() || _allColumnDefinitions == null) return;
-
-            foreach (var netshInfo in netshInterfaces)
+            if (_visibleColumnKeys == null || !_visibleColumnKeys.Any() || _allColumnDefinitions == null)
             {
-                // Try to find matching system interface for richer details
-                if (systemInterfaces.TryGetValue(netshInfo.Name, out NetworkInterface? systemAdapter))
+                System.Diagnostics.Debug.WriteLine("Cannot populate ListView: VisibleColumnKeys or AllColumnDefinitions is null/empty.");
+                return;
+            }
+
+            foreach (var baseInfo in netshInterfaces)
+            {
+                // Log baseInfo before creating displayInfo
+                System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: Processing baseInfo: Name='{baseInfo.Name}', AdminState='{baseInfo.AdminState}', OperationalState='{baseInfo.OperationalState}'");
+
+                SimpleNetInterfaceInfo displayInfo = new SimpleNetInterfaceInfo {
+                    Name = baseInfo.Name,
+                    AdminState = baseInfo.AdminState,
+                    OperationalState = baseInfo.OperationalState
+                    // Description, Type, ID will be populated next if available
+                };
+
+                if (systemInterfaces.TryGetValue(displayInfo.Name, out NetworkInterface? systemAdapter))
                 {
-                    netshInfo.Description = systemAdapter.Description;
-                    netshInfo.Type = systemAdapter.NetworkInterfaceType.ToString();
-                    netshInfo.Id = systemAdapter.Id;
+                    displayInfo.Description = systemAdapter.Description;
+                    displayInfo.Type = systemAdapter.NetworkInterfaceType.ToString();
+                    displayInfo.Id = systemAdapter.Id;
                 }
 
                 ListViewItem item;
-                ColumnDefinition firstColDef = _allColumnDefinitions.First(cd => cd.Key == _visibleColumnKeys.First());
-                item = new ListViewItem(firstColDef.ValueGetter(netshInfo));
+                var firstKey = _visibleColumnKeys.FirstOrDefault();
+                if (firstKey == null) {
+                    System.Diagnostics.Debug.WriteLine("PopulateNetworkInterfaces: First visible column key is null, cannot create ListView item.");
+                    continue;
+                }
+                ColumnDefinition firstColDef = _allColumnDefinitions.FirstOrDefault(cd => cd.Key == firstKey);
+                if (string.IsNullOrEmpty(firstColDef.Key))
+                {
+                    System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: First column definition for key '{firstKey}' not found. Skipping item.");
+                    continue;
+                }
+
+                string firstColText = firstColDef.ValueGetter(displayInfo);
+                System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: For item '{displayInfo.Name}', first visible column ('{firstKey}') text = '{firstColText}'");
+                item = new ListViewItem(firstColText);
 
                 for (int i = 1; i < _visibleColumnKeys.Count; i++)
                 {
-                    ColumnDefinition colDef = _allColumnDefinitions.First(cd => cd.Key == _visibleColumnKeys[i]);
-                    item.SubItems.Add(colDef.ValueGetter(netshInfo));
+                    string currentKey = _visibleColumnKeys[i];
+                    ColumnDefinition colDef = _allColumnDefinitions.FirstOrDefault(cd => cd.Key == currentKey);
+                    if (string.IsNullOrEmpty(colDef.Key))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: Column definition for key '{currentKey}' not found. Skipping subitem for '{displayInfo.Name}'.");
+                        item.SubItems.Add("");
+                        continue;
+                    }
+
+                    string subItemText;
+                    if (currentKey == "AdminState")
+                    {
+                        // Explicitly use displayInfo.AdminState for the AdminState column
+                        subItemText = displayInfo.AdminState;
+                        System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: For item '{displayInfo.Name}', AdminState column using explicit displayInfo.AdminState='{subItemText}' (display index {i}, subitem index {i-1})");
+                    }
+                    else
+                    {
+                        subItemText = colDef.ValueGetter(displayInfo);
+                        System.Diagnostics.Debug.WriteLine($"PopulateNetworkInterfaces: For item '{displayInfo.Name}', subitem for key='{currentKey}' (display index {i}, subitem index {i-1}) text = '{subItemText}' (via ValueGetter)");
+                    }
+                    item.SubItems.Add(subItemText);
                 }
 
-                item.Tag = netshInfo.Name; // Store the NAME from netsh, as this is what 'set interface' uses
+                item.Tag = displayInfo.Name;
+
+                // FINAL CHECK LOGGING
+                if (item.Tag is string tagNameForFinalCheck && tagNameForFinalCheck.Equals("Wi-Fi", StringComparison.OrdinalIgnoreCase))
+                {
+                    System.Diagnostics.Debug.WriteLine($"FINAL CHECK for item '{tagNameForFinalCheck}' before adding to ListView:");
+                    System.Diagnostics.Debug.WriteLine($"  item.Text (Col 0) = '{item.Text}'");
+                    if (_visibleColumnKeys.Count > 1 && item.SubItems.Count > 0)
+                    {
+                        // Assuming AdminState is typically _visibleColumnKeys[1] which maps to SubItems[0]
+                        System.Diagnostics.Debug.WriteLine($"  item.SubItems[0].Text (Col 1, e.g., AdminState if Key={_visibleColumnKeys[1]}) = '{item.SubItems[0].Text}'");
+                    }
+                    if (_visibleColumnKeys.Count > 2 && item.SubItems.Count > 1)
+                    {
+                        // Assuming OperationalState is typically _visibleColumnKeys[2] which maps to SubItems[1]
+                        System.Diagnostics.Debug.WriteLine($"  item.SubItems[1].Text (Col 2, e.g., OpState if Key={_visibleColumnKeys[2]}) = '{item.SubItems[1].Text}'");
+                    }
+                }
                 listViewNetworkInterfaces.Items.Add(item);
+            }
+
+            // Restore selection
+            if (!string.IsNullOrEmpty(previouslySelectedInterfaceName))
+            {
+                foreach (ListViewItem item in listViewNetworkInterfaces.Items)
+                {
+                    if (item.Tag is string tagName && tagName == previouslySelectedInterfaceName)
+                    {
+                        item.Selected = true;
+                        item.EnsureVisible();
+                        listViewNetworkInterfaces.Focus(); // Ensure the ListView has focus to show selection
+                        break;
+                    }
+                }
             }
         }
 
@@ -237,31 +670,28 @@ namespace NetworkManagerAppModern
         {
             if (_allColumnDefinitions == null || _visibleColumnKeys == null) return;
 
-            // The ValueGetter in ColumnDefinition now expects SimpleNetInterfaceInfo
-            // So, the Select method for ColumnSelectionForm needs to reflect this.
-            // For now, we pass keys as before.
             List<string> allColumnKeys = _allColumnDefinitions.Select(cd => cd.Key).ToList();
             List<string> currentlyVisibleKeys = new List<string>(_visibleColumnKeys);
 
             using (ColumnSelectionForm colForm = new ColumnSelectionForm(allColumnKeys, currentlyVisibleKeys))
             {
-                if (colForm.ShowDialog(this) == DialogResult.OK) // Pass 'this' to center on parent
+                if (colForm.ShowDialog(this) == DialogResult.OK)
                 {
                     _visibleColumnKeys = new List<string>(colForm.SelectedColumnKeys);
-                    PopulateNetworkInterfaces(); // Refresh columns and data
+                    SaveColumnSettings();
+                    PopulateNetworkInterfaces();
                 }
             }
         }
 
         private void BtnRefreshList_Click(object? sender, EventArgs e)
         {
-            PopulateNetworkInterfaces();
+            PopulateNetworkInterfaces(isManualRefresh: true);
         }
 
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            // Defer hiding until after the form is fully loaded and shown once (helps with first Show() call)
             this.BeginInvoke(new MethodInvoker(delegate {
                 Hide();
                 ShowInTaskbar = false;
@@ -278,58 +708,146 @@ namespace NetworkManagerAppModern
             UpdateSelectedInterfaces(false);
         }
 
+        // Helper method to find the display index of a column based on its key
+        private int GetDisplayIndexOfColumnKey(string columnKeyToFind)
+        {
+            if (_visibleColumnKeys == null)
+            {
+                System.Diagnostics.Debug.WriteLine("GetDisplayIndexOfColumnKey: _visibleColumnKeys is null.");
+                return -1;
+            }
+            System.Diagnostics.Debug.WriteLine($"GetDisplayIndexOfColumnKey: Searching for '{columnKeyToFind}' in _visibleColumnKeys: [{string.Join(", ", _visibleColumnKeys)}]");
+            for (int i = 0; i < _visibleColumnKeys.Count; i++)
+            {
+                if (_visibleColumnKeys[i] == columnKeyToFind)
+                {
+                    System.Diagnostics.Debug.WriteLine($"GetDisplayIndexOfColumnKey: Found '{columnKeyToFind}' at display index {i}.");
+                    return i;
+                }
+            }
+            System.Diagnostics.Debug.WriteLine($"GetDisplayIndexOfColumnKey: Did not find '{columnKeyToFind}'.");
+            return -1;
+        }
+
         private void UpdateSelectedInterfaces(bool enable)
         {
+            System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces called with enable: {enable}");
             if (listViewNetworkInterfaces.SelectedItems.Count == 0)
             {
                 MessageBox.Show("Please select one or more network interfaces.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
+            string targetState = enable ? "Enabled" : "Disabled";
+            string pendingStatusText = enable ? "Enabling..." : "Disabling...";
+
+            System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Target state: {targetState}, Pending text: {pendingStatusText}");
+            int adminStateDisplayIndex = GetDisplayIndexOfColumnKey("AdminState");
+            System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: adminStateDisplayIndex for 'AdminState' key: {adminStateDisplayIndex}");
+
+
+            List<string> interfaceNamesToProcess = new List<string>();
+
             foreach (ListViewItem selectedItem in listViewNetworkInterfaces.SelectedItems)
             {
-                // The Tag now stores the interface name (string) as recognized by netsh
-                if (selectedItem.Tag is string interfaceName && !string.IsNullOrEmpty(interfaceName))
+                System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Processing selected item with Tag: {selectedItem.Tag}");
+                string currentDisplayedAdminState = string.Empty;
+
+                if (adminStateDisplayIndex != -1)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Attempting to {(enable ? "enable" : "disable")} interface using Name from Tag: '{interfaceName}'");
-                    ExecuteNetshCommandByName(interfaceName, enable);
+                    if (adminStateDisplayIndex == 0)
+                    {
+                        currentDisplayedAdminState = selectedItem.Text;
+                        System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Reading AdminState from selectedItem.Text (display index 0): '{currentDisplayedAdminState}'");
+                    }
+                    else if (adminStateDisplayIndex > 0 && selectedItem.SubItems.Count > (adminStateDisplayIndex)) // SubItem index is displayIndex - 1
+                    {
+                        currentDisplayedAdminState = selectedItem.SubItems[adminStateDisplayIndex].Text;
+                        System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Reading AdminState from selectedItem.SubItems[{adminStateDisplayIndex}].Text: '{currentDisplayedAdminState}'");
+                    }
+                    else
+                    {
+                         System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: AdminState column (display index {adminStateDisplayIndex}) not found or SubItems too short for item {selectedItem.Tag}. SubItem count: {selectedItem.SubItems.Count}");
+                    }
                 }
                 else
                 {
-                    System.Diagnostics.Debug.WriteLine($"Skipping item with invalid Tag: {selectedItem.Tag}");
-                    // Optionally, inform the user if an item was unexpectedly untaggable or had wrong tag type
+                     System.Diagnostics.Debug.WriteLine("UpdateSelectedInterfaces: AdminState column key not found in visible columns.");
+                }
+
+                bool alreadyInTargetState = !string.IsNullOrEmpty(currentDisplayedAdminState) && currentDisplayedAdminState.Equals(targetState, StringComparison.OrdinalIgnoreCase);
+                bool alreadyPending = !string.IsNullOrEmpty(currentDisplayedAdminState) && currentDisplayedAdminState.Equals(pendingStatusText, StringComparison.OrdinalIgnoreCase);
+
+                System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: For item {selectedItem.Tag} - CurrentDisplayedAdminState: '{currentDisplayedAdminState}', TargetState: '{targetState}', IsAlreadyInTargetState: {alreadyInTargetState}, IsAlreadyPending: {alreadyPending}");
+
+                if (alreadyInTargetState || alreadyPending)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Interface {selectedItem.Tag} is already in or pending '{targetState}' state. Skipping.");
+                    continue;
+                }
+
+                selectedItem.ForeColor = SystemColors.GrayText;
+                selectedItem.BackColor = SystemColors.ControlLight;
+                System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Set ForeColor=GrayText, BackColor=ControlLight for item {selectedItem.Tag}");
+
+
+                if (adminStateDisplayIndex != -1)
+                {
+                    if (adminStateDisplayIndex == 0)
+                    {
+                        selectedItem.Text = pendingStatusText;
+                        System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Set selectedItem.Text to '{pendingStatusText}' for item {selectedItem.Tag}");
+                    }
+                    else if (adminStateDisplayIndex > 0)
+                    {
+                        if (selectedItem.SubItems.Count > (adminStateDisplayIndex) )
+                        {
+                             selectedItem.SubItems[adminStateDisplayIndex].Text = pendingStatusText;
+                             System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Set selectedItem.SubItems[{adminStateDisplayIndex}].Text to '{pendingStatusText}' for item {selectedItem.Tag}");
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Warning: AdminState column (display index {adminStateDisplayIndex}) still not found in SubItems for item {selectedItem.Tag} when trying to write. SubItem count: {selectedItem.SubItems.Count}");
+                        }
+                    }
+                }
+                else
+                {
+                     System.Diagnostics.Debug.WriteLine("Warning: AdminState column is not visible, cannot set pending text for it (this should have been logged before).");
+                }
+
+                if (selectedItem.Tag is string interfaceName && !string.IsNullOrEmpty(interfaceName))
+                {
+                    interfaceNamesToProcess.Add(interfaceName);
                 }
             }
-            // Refresh the list once after all operations are attempted
-            PopulateNetworkInterfaces();
+
+            if (!interfaceNamesToProcess.Any())
+            {
+                System.Diagnostics.Debug.WriteLine("No interfaces needed processing after pre-checks.");
+                return;
+            }
+
+            foreach (string interfaceNameToProcess in interfaceNamesToProcess)
+            {
+                System.Diagnostics.Debug.WriteLine($"Attempting to {(enable ? "enable" : "disable")} interface using Name from Tag: '{interfaceNameToProcess}'");
+                ExecuteNetshCommandByName(interfaceNameToProcess, enable);
+            }
         }
 
-        // Reverted to use interface name, with enhanced logging
         private void ExecuteNetshCommandByName(string interfaceName, bool enable)
         {
             System.Diagnostics.Debug.WriteLine($"ExecuteNetshCommandByName: Raw interfaceName received = '{interfaceName}'");
-
-            // For safety, if a name itself contains a quote, this basic approach might need more advanced escaping.
-            // However, standard interface names obtained from NetworkInterface.Name usually don't.
             string processedName = interfaceName;
-
             string arguments = $"interface set interface name=\"{processedName}\" admin={(enable ? "enable" : "disable")}";
             System.Diagnostics.Debug.WriteLine($"ExecuteNetshCommandByName: Executing 'netsh.exe' with arguments: \"{arguments}\"");
 
             ProcessStartInfo psi = new ProcessStartInfo("netsh", arguments)
             {
-                Verb = "runas", // Request administrator privileges
+                Verb = "runas",
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
-                UseShellExecute = true, // Must be true for Verb to work with "runas"
-                // For capturing output, UseShellExecute must be false.
-                // However, 'runas' verb requires UseShellExecute = true.
-                // This means we can't directly capture output when using 'runas' this way.
-                // The UAC prompt itself is handled by ShellExecute.
-                // If 'runas' fails silently or netsh errors out AFTER elevation, this direct capture won't work.
-                // We will primarily rely on ExitCode if the process runs.
-                // RedirectStandardOutput = true, // Cannot use with UseShellExecute = true
-                // RedirectStandardError = true   // Cannot use with UseShellExecute = true
+                UseShellExecute = true,
             };
 
             try
@@ -341,9 +859,7 @@ namespace NetworkManagerAppModern
                         MessageBox.Show($"Failed to start netsh process for interface '{processedName}'.", "Process Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
                     }
-
                     process.WaitForExit();
-
                     if (process.ExitCode != 0)
                     {
                         string errorMsg = $"Netsh command failed for interface '{processedName}' with exit code: {process.ExitCode}.";
@@ -354,7 +870,7 @@ namespace NetworkManagerAppModern
             catch (System.ComponentModel.Win32Exception ex)
             {
                 string detailedError = $"Operation for interface '{processedName}' failed.\nWin32 Error Code: {ex.NativeErrorCode}\nMessage: {ex.Message}";
-                if (ex.NativeErrorCode == 1223) // UAC Denied
+                if (ex.NativeErrorCode == 1223)
                 {
                     detailedError = $"Operation for interface '{processedName}' was canceled by the user (UAC prompt denied).";
                 }
@@ -365,7 +881,6 @@ namespace NetworkManagerAppModern
                 MessageBox.Show($"An unexpected error occurred while trying to modify interface '{processedName}': {ex.Message}", "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
-
 
         private void NotifyIcon1_DoubleClick(object? sender, EventArgs e)
         {
@@ -379,7 +894,7 @@ namespace NetworkManagerAppModern
 
         private void ExitMenuItem_Click(object? sender, EventArgs e)
         {
-            _isExiting = true; // Signal that we are intentionally exiting
+            _isExiting = true;
             if (notifyIcon1 != null)
             {
                 notifyIcon1.Visible = false;
@@ -392,13 +907,30 @@ namespace NetworkManagerAppModern
         {
             if (e.CloseReason == CloseReason.UserClosing && !_isExiting)
             {
-                e.Cancel = true; // Cancel the actual closing operation
-                this.Hide();     // Hide the form
-                this.ShowInTaskbar = false; // Optional: remove from taskbar
-                // Optionally, show a balloon tip from the tray icon
-                // notifyIcon1.ShowBalloonTip(1000, "Application Minimized", "Network Manager is running in the background.", ToolTipIcon.Info);
+                e.Cancel = true;
+                this.Hide();
+                this.ShowInTaskbar = false;
             }
-            // If _isExiting is true, or if it's not UserClosing (e.g. Windows shutting down), allow the close
+            else if (_isExiting)
+            {
+                NetworkChange.NetworkAddressChanged -= new NetworkAddressChangedEventHandler(AddressChangedCallback);
+                if (_initialRefreshDelayTimer != null)
+                {
+                    _initialRefreshDelayTimer.Stop();
+                    _initialRefreshDelayTimer.Dispose();
+                }
+                if (_pollingTimer != null)
+                {
+                    _pollingTimer.Stop();
+                    _pollingTimer.Dispose();
+                }
+                if (_wmiWatcher != null)
+                {
+                    _wmiWatcher.Stop();
+                    _wmiWatcher.Dispose();
+                    System.Diagnostics.Debug.WriteLine("WMI Watcher stopped and disposed.");
+                }
+            }
         }
 
         private void ToggleFormVisibility()
@@ -406,19 +938,17 @@ namespace NetworkManagerAppModern
             if (this.Visible)
             {
                 this.Hide();
-                // this.ShowInTaskbar = false; // Optional: remove from taskbar when hidden
             }
             else
             {
-                // Ensure the window is in a normal state before showing
                 if (this.WindowState == FormWindowState.Minimized)
                 {
                     this.WindowState = FormWindowState.Normal;
                 }
-                this.Show(); // Make the form visible
-                this.ShowInTaskbar = true; // Ensure it's in the taskbar
-                this.Activate();         // Attempt to give it focus
-                this.BringToFront();     // Ensure it's on top of other windows
+                this.Show();
+                this.ShowInTaskbar = true;
+                this.Activate();
+                this.BringToFront();
             }
         }
     }

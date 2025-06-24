@@ -22,5 +22,17 @@ namespace NetworkManagerAppModern.Properties {
                 return defaultInstance;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public global::System.Collections.Specialized.StringCollection VisibleColumnKeys {
+            get {
+                return ((global::System.Collections.Specialized.StringCollection)(this["VisibleColumnKeys"]));
+            }
+            set {
+                this["VisibleColumnKeys"] = value;
+            }
+        }
     }
 }
