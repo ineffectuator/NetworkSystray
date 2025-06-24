@@ -721,16 +721,25 @@ namespace NetworkManagerAppModern
         {
             try
             {
-                var geolocator = new Geolocator();
                 var accessStatus = await Geolocator.RequestAccessAsync();
 
                 switch (accessStatus)
                 {
                     case GeolocationAccessStatus.Allowed:
+                        var geolocator = new Geolocator();
+                        geolocator.DesiredAccuracy = PositionAccuracy.Default;
+                        var pos=await geolocator.GetGeopositionAsync();
+
                         System.Diagnostics.Debug.WriteLine($"Location access reported as Allowed. Checking LocationStatus: {geolocator.LocationStatus}");
                         // Only consider it truly enabled if the status is Ready.
                         // Other statuses like Initializing, NoData, or even if it's Allowed but Disabled/NotAvailable globally.
-                        if (geolocator.LocationStatus == PositionStatus.Ready)
+
+                        if (geolocator.LocationStatus == PositionStatus.NotInitialized)
+                        {
+                            System.Diagnostics.Debug.WriteLine("LocationStatus is NotInitialized, but we don't care.");
+                            return true;
+                        }
+                        else if (geolocator.LocationStatus == PositionStatus.Ready)
                         {
                             System.Diagnostics.Debug.WriteLine("LocationStatus is Ready.");
                             return true;
@@ -890,7 +899,7 @@ namespace NetworkManagerAppModern
                  if (opStateDisplayIndex == 0) selectedItem.Text = pendingStatusText;
                  else if (opStateDisplayIndex > 0 && selectedItem.SubItems.Count >= opStateDisplayIndex)
                  {
-                    selectedItem.SubItems[opStateDisplayIndex - 1].Text = pendingStatusText;
+                    selectedItem.SubItems[opStateDisplayIndex].Text = pendingStatusText;
                  }
                  selectedItem.ForeColor = SystemColors.GrayText;
                  selectedItem.BackColor = SystemColors.ControlLight;
@@ -1025,7 +1034,7 @@ namespace NetworkManagerAppModern
             return profiles.Distinct().ToList(); // Ensure uniqueness
         }
 
-        private void ListViewNetworkInterfaces_SelectedIndexChanged(object? sender, EventArgs e)
+        private async void ListViewNetworkInterfaces_SelectedIndexChanged(object? sender, EventArgs e)
         {
             // Default to hiding buttons
             btnConnectSelected.Visible = false;
@@ -1042,7 +1051,7 @@ namespace NetworkManagerAppModern
                     // For now, we'll use a placeholder logic.
                     SimpleNetInterfaceInfo? netInfo = _lastKnownInterfaces.FirstOrDefault(i => i.Name == interfaceName);
 
-                    if (netInfo != null && netInfo.NetType == NetworkInterfaceType.Wireless80211) // Compare enum directly
+                    if (netInfo != null && netInfo.NetType == NetworkInterfaceType.Wireless80211 && await IsLocationServiceEnabledAsync()) // Compare enum directly
                     {
                         btnConnectSelected.Visible = true;
                         btnDisconnectSelected.Visible = true;

@@ -43,7 +43,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="ProfileSelectionDialog.cs" />
+    <!--<Compile Include="ProfileSelectionDialog.cs" />-->
   </ItemGroup>
 
 </Project>
