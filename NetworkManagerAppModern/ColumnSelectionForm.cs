@@ -35,19 +35,53 @@ namespace NetworkManagerAppModern
                 }
             }
             // Handle ItemCheck to prevent unchecking mandatory columns
-            checkedListBoxColumns.ItemCheck += CheckedListBoxColumns_ItemCheck;
+            // checkedListBoxColumns.ItemCheck += CheckedListBoxColumns_ItemCheck; // Replaced by MouseUp logic
 
             // Attach event handler for OK button click
             this.btnOK.Click += BtnOK_Click;
+            // Attach event handler for MouseUp for single-click toggle
+            this.checkedListBoxColumns.MouseUp += CheckedListBoxColumns_MouseUp;
         }
 
+        private void CheckedListBoxColumns_MouseUp(object? sender, MouseEventArgs e)
+        {
+            int index = checkedListBoxColumns.IndexFromPoint(e.Location);
+            if (index != CheckedListBox.NoMatches) // An item was clicked
+            {
+                string? itemText = checkedListBoxColumns.Items[index]?.ToString();
+                if (itemText != null)
+                {
+                    if (_mandatoryColumnKeys.Contains(itemText))
+                    {
+                        // For mandatory items, ensure they are always checked.
+                        // The click might have been on the text part, not the checkbox.
+                        // The default behavior might try to uncheck it before ItemCheck prevents it.
+                        // By setting it here, we ensure it remains checked visually.
+                        if (!checkedListBoxColumns.GetItemChecked(index))
+                        {
+                            checkedListBoxColumns.SetItemChecked(index, true);
+                        }
+                        return; // Do not toggle mandatory columns
+                    }
+
+                    // For non-mandatory items, toggle their check state
+                    bool currentCheckedState = checkedListBoxColumns.GetItemChecked(index);
+                    checkedListBoxColumns.SetItemChecked(index, !currentCheckedState);
+                }
+            }
+        }
+
+        // Original ItemCheck logic might still be useful as a safeguard,
+        // but the primary interaction is now handled by MouseUp.
+        // If MouseUp correctly handles mandatory columns, this might be redundant or could be simplified.
+        // For now, let's keep it to ensure mandatory columns cannot be unchecked by other means.
         private void CheckedListBoxColumns_ItemCheck(object? sender, ItemCheckEventArgs e)
         {
             // Prevent unchecking of mandatory columns
-            if (e.CurrentValue == CheckState.Checked && e.NewValue == CheckState.Unchecked)
+            string? itemText = checkedListBoxColumns.Items[e.Index]?.ToString();
+            if (itemText != null && _mandatoryColumnKeys.Contains(itemText))
             {
-                string? itemText = checkedListBoxColumns.Items[e.Index]?.ToString();
-                if (itemText != null && _mandatoryColumnKeys.Contains(itemText))
+                if (e.NewValue == CheckState.Unchecked)
                 {
                     e.NewValue = CheckState.Checked; // Keep it checked
                 }
