@@ -7,6 +7,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>appicon.ico</ApplicationIcon> <!-- We'll need an appicon.ico file for this -->
+    <ApplicationManifest>app.manifest</ApplicationManifest> <!-- Add this line -->
   </PropertyGroup>
 
   <!-- This section is for embedding the icon if you add it to the project root -->

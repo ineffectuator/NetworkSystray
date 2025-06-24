@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="NetworkManagerAppModern Setup" Language="1033" Version="1.0.0.0" Manufacturer="MyCompany" UpgradeCode="a2e5f7fb-ee02-4c46-b846-df4cc7e477d2">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" InstallPrivileges="elevated" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="ProductFeature" Title="MainApplication" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="ApplicationShortcut" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="NetworkManagerAppModern" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="NetworkManagerAppModern"/>
+      </Directory>
+    </Directory>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="NetworkManagerAppModern.exe" Guid="*">
+        <File Id="NetworkManagerAppModern.exe" Source="..\NetworkManagerAppModern\bin\Release\net8.0-windows10.0.19041.0\NetworkManagerAppModern.exe" KeyPath="yes" Checksum="yes"/>
+      </Component>
+      <Component Id="SomeDependency.dll" Guid="*">
+        <File Id="SomeDependency.dll" Source="..\NetworkManagerAppModern\bin\Release\net8.0-windows10.0.19041.0\SomeDependency.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="AnotherDependency.dll" Guid="*">
+        <File Id="AnotherDependency.dll" Source="..\NetworkManagerAppModern\bin\Release\net8.0-windows10.0.19041.0\AnotherDependency.dll" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Component Id="ApplicationShortcut" Directory="ApplicationProgramsFolder">
+      <Shortcut Id="ApplicationStartMenuShortcut"
+                Name="Network Manager App Modern"
+                Description="Network Manager Application"
+                Target="[INSTALLFOLDER]NetworkManagerAppModern.exe"
+                WorkingDirectory="INSTALLFOLDER"/>
+      <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
+      <RegistryValue Root="HKCU" Key="Software\MyCompany\NetworkManagerAppModern" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
+    </Component>
+
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <UIRef Id="WixUI_InstallDir" />
+
+  </Product>
+</Wix>
