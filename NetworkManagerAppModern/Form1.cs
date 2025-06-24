@@ -760,10 +760,10 @@ namespace NetworkManagerAppModern
                         currentDisplayedAdminState = selectedItem.Text;
                         System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Reading AdminState from selectedItem.Text (display index 0): '{currentDisplayedAdminState}'");
                     }
-                    else if (adminStateDisplayIndex > 0 && selectedItem.SubItems.Count > (adminStateDisplayIndex - 1)) // SubItem index is displayIndex - 1
+                    else if (adminStateDisplayIndex > 0 && selectedItem.SubItems.Count > (adminStateDisplayIndex)) // SubItem index is displayIndex - 1
                     {
-                        currentDisplayedAdminState = selectedItem.SubItems[adminStateDisplayIndex - 1].Text;
-                        System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Reading AdminState from selectedItem.SubItems[{adminStateDisplayIndex - 1}].Text: '{currentDisplayedAdminState}'");
+                        currentDisplayedAdminState = selectedItem.SubItems[adminStateDisplayIndex].Text;
+                        System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Reading AdminState from selectedItem.SubItems[{adminStateDisplayIndex}].Text: '{currentDisplayedAdminState}'");
                     }
                     else
                     {
@@ -800,10 +800,10 @@ namespace NetworkManagerAppModern
                     }
                     else if (adminStateDisplayIndex > 0)
                     {
-                        if (selectedItem.SubItems.Count > (adminStateDisplayIndex -1) )
+                        if (selectedItem.SubItems.Count > (adminStateDisplayIndex) )
                         {
-                             selectedItem.SubItems[adminStateDisplayIndex - 1].Text = pendingStatusText;
-                             System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Set selectedItem.SubItems[{adminStateDisplayIndex-1}].Text to '{pendingStatusText}' for item {selectedItem.Tag}");
+                             selectedItem.SubItems[adminStateDisplayIndex].Text = pendingStatusText;
+                             System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfaces: Set selectedItem.SubItems[{adminStateDisplayIndex}].Text to '{pendingStatusText}' for item {selectedItem.Tag}");
                         }
                         else
                         {
