@@ -42,4 +42,8 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="ProfileSelectionDialog.cs" />
+  </ItemGroup>
+
 </Project>

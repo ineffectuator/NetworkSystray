@@ -18,7 +18,8 @@ namespace NetworkManagerAppModern
         public string AdminState { get; set; } = string.Empty; // e.g., "Enabled", "Disabled"
         public string OperationalState { get; set; } = string.Empty; // e.g., "Connected", "Disconnected"
         public string? Description { get; set; } // Optional: from NetworkInterface object
-        public string? Type { get; set; } // Optional
+        // public string? Type { get; set; } // Optional - Replaced by NetType
+        public NetworkInterfaceType? NetType { get; set; } // To store the actual enum type
         public string? Id { get; set; } // Optional
 
         // We will primarily rely on Name for enabling/disabling via netsh
@@ -30,7 +31,7 @@ namespace NetworkManagerAppModern
         public string Key { get; }
         public string HeaderText { get; }
         public int DefaultWidth { get; }
-        public Func<SimpleNetInterfaceInfo, string> ValueGetter { get; } // Changed type here
+        public Func<SimpleNetInterfaceInfo, string> ValueGetter { get; }
 
         public ColumnDefinition(string key, string headerText, int defaultWidth, Func<SimpleNetInterfaceInfo, string> valueGetter)
         {
@@ -92,9 +93,11 @@ namespace NetworkManagerAppModern
             this.btnRefreshList.Click += new System.EventHandler(this.BtnRefreshList_Click);
             this.btnEnableSelected.Click += new System.EventHandler(this.BtnEnableSelected_Click);
             this.btnDisableSelected.Click += new System.EventHandler(this.BtnDisableSelected_Click);
+            // Event handlers for new buttons
             this.btnConnectSelected.Click += new System.EventHandler(this.BtnConnectSelected_Click);
             this.btnDisconnectSelected.Click += new System.EventHandler(this.BtnDisconnectSelected_Click);
             this.btnSelectColumns.Click += new System.EventHandler(this.BtnSelectColumns_Click);
+            this.listViewNetworkInterfaces.SelectedIndexChanged += new System.EventHandler(this.ListViewNetworkInterfaces_SelectedIndexChanged);
 
             PopulateNetworkInterfaces(); // Initial population
 
@@ -377,7 +380,7 @@ namespace NetworkManagerAppModern
                 new ColumnDefinition("AdminState", "Admin State", 100, info => info.AdminState),
                 new ColumnDefinition("OperationalState", "Op. Status", 120, info => info.OperationalState),
                 new ColumnDefinition("Description", "Description", 250, info => info.Description ?? ""),
-                new ColumnDefinition("Type", "Type", 100, info => info.Type ?? ""),
+                new ColumnDefinition("Type", "Type", 100, info => info.NetType?.ToString() ?? ""), // Updated to use NetType
                 new ColumnDefinition("ID", "ID", 200, info => info.Id ?? ""),
             };
             LoadColumnSettings();
@@ -548,7 +551,7 @@ namespace NetworkManagerAppModern
 
             _lastKnownInterfaces = new List<SimpleNetInterfaceInfo>(netshInterfaces.Select(ni => new SimpleNetInterfaceInfo {
                 Name = ni.Name, AdminState = ni.AdminState, OperationalState = ni.OperationalState,
-                Description = ni.Description, Id = ni.Id, Type = ni.Type
+                Description = ni.Description, Id = ni.Id, NetType = ni.NetType // Ensure NetType is copied if available from netsh parsing (though unlikely)
             }));
 
             Dictionary<string, NetworkInterface> systemInterfaces = new Dictionary<string, NetworkInterface>();
@@ -584,7 +587,7 @@ namespace NetworkManagerAppModern
                 if (systemInterfaces.TryGetValue(displayInfo.Name, out NetworkInterface? systemAdapter))
                 {
                     displayInfo.Description = systemAdapter.Description;
-                    displayInfo.Type = systemAdapter.NetworkInterfaceType.ToString();
+                    displayInfo.NetType = systemAdapter.NetworkInterfaceType; // Store the enum
                     displayInfo.Id = systemAdapter.Id;
                 }
 
@@ -717,213 +720,38 @@ namespace NetworkManagerAppModern
 
         private void BtnDisconnectSelected_Click(object? sender, EventArgs e)
         {
+            // To be implemented in the next step (Implement Disconnect Logic)
             UpdateSelectedInterfacesConnectionState(false);
         }
 
-        private void UpdateSelectedInterfacesConnectionState(bool connect)
+
+        private void ExecuteNetshWlanCommand(string interfaceName, string? profileName, bool connect)
         {
-            System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState called with connect: {connect}");
-            if (listViewNetworkInterfaces.SelectedItems.Count == 0)
+            string action = connect ? "connect" : "disconnect";
+            string arguments;
+
+            if (connect)
             {
-                MessageBox.Show("Please select one or more network interfaces.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
+                if (string.IsNullOrEmpty(profileName))
+                {
+                    MessageBox.Show($"No profile specified to connect Wi-Fi interface '{interfaceName}'.", "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                arguments = $"wlan connect name=\"{profileName}\" interface=\"{interfaceName}\"";
+            }
+            else // Disconnect
+            {
+                arguments = $"wlan disconnect interface=\"{interfaceName}\"";
             }
 
-            string targetOpState = connect ? "Connected" : "Disconnected";
-            string pendingStatusText = connect ? "Connecting..." : "Disconnecting...";
-            string currentOperationPastTense = connect ? "connected" : "disconnected"; // For messages
-
-            System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState: Target op state: {targetOpState}, Pending text: {pendingStatusText}");
-            int opStateDisplayIndex = GetDisplayIndexOfColumnKey("OperationalState");
-            System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState: opStateDisplayIndex for 'OperationalState' key: {opStateDisplayIndex}");
-
-            List<string> interfaceNamesToProcess = new List<string>();
-
-            foreach (ListViewItem selectedItem in listViewNetworkInterfaces.SelectedItems)
-            {
-                if (!(selectedItem.Tag is string interfaceName) || string.IsNullOrEmpty(interfaceName))
-                {
-                    System.Diagnostics.Debug.WriteLine("UpdateSelectedInterfacesConnectionState: Selected item has no valid interface name in Tag. Skipping.");
-                    continue;
-                }
-
-                System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState: Processing selected item '{interfaceName}' (Tag: {selectedItem.Tag})");
-                string currentDisplayedOpState = string.Empty;
-
-                if (opStateDisplayIndex != -1)
-                {
-                    if (opStateDisplayIndex == 0) // OperationalState is the first column
-                    {
-                        currentDisplayedOpState = selectedItem.Text;
-                    }
-                    else if (opStateDisplayIndex > 0 && selectedItem.SubItems.Count > (opStateDisplayIndex)) // SubItem index is displayIndex
-                    {
-                        // Corrected: SubItems are 0-indexed, and Text is the first column.
-                        // So if opStateDisplayIndex is 1 (second column), subitem is at index 0 of SubItems collection.
-                        // No, if opStateDisplayIndex is the actual index in _visibleColumnKeys,
-                        // then if it's 0, it's selectedItem.Text.
-                        // If it's 1, it's selectedItem.SubItems[0].Text.
-                        // If it's N, it's selectedItem.SubItems[N-1].Text.
-                        // The GetDisplayIndexOfColumnKey returns the direct index in _visibleColumnKeys.
-                        // The ListViewItem.SubItems collection maps to columns *after* the first one.
-                        // So, if opStateDisplayIndex is, say, 2 (meaning it's the 3rd column displayed),
-                        // then its text is in selectedItem.SubItems[1].Text.
-                        // The code in UpdateSelectedInterfaces (for AdminState) seems to use displayIndex directly for SubItems, this might be a bug there or my understanding is off.
-                        // Let's re-evaluate how SubItems are indexed relative to GetDisplayIndexOfColumnKey.
-                        // listViewItem.SubItems[0] is the text of the *second* column.
-                        // listViewItem.SubItems[i] is the text of the *(i+2)th* column.
-                        // The first column's text is listViewItem.Text.
-                        // So, if opStateDisplayIndex is 0, use selectedItem.Text.
-                        // If opStateDisplayIndex is > 0, use selectedItem.SubItems[opStateDisplayIndex -1].Text (if subitems exist for that index)
-
-                        // Re-checking UpdateSelectedInterfaces:
-                        // if (adminStateDisplayIndex == 0) { currentDisplayedAdminState = selectedItem.Text; }
-                        // else if (adminStateDisplayIndex > 0 && selectedItem.SubItems.Count > (adminStateDisplayIndex))
-                        // { currentDisplayedAdminState = selectedItem.SubItems[adminStateDisplayIndex].Text; } -> THIS IS LIKELY WRONG in UpdateSelectedInterfaces
-                        // It should be selectedItem.SubItems[adminStateDisplayIndex - 1].Text if adminStateDisplayIndex > 0.
-                        // For now, let's assume the existing pattern, but this needs verification.
-                        // If 'OperationalState' is the 3rd column (index 2 in _visibleColumnKeys), then its value is in SubItems[1] (index 2 of the SubItems array if Text is item 0).
-                        // Let's stick to the pattern used in UpdateSelectedInterfaces for now and re-evaluate if it causes issues.
-                        // My previous comment on UpdateSelectedInterfaces was: "SubItem index is displayIndex - 1".
-                        // If GetDisplayIndexOfColumnKey returns the 0-based index of the column as displayed:
-                        // Column 0: selectedItem.Text
-                        // Column 1: selectedItem.SubItems[0].Text
-                        // Column N: selectedItem.SubItems[N-1].Text (for N > 0)
-
-                        if (opStateDisplayIndex == 0) {
-                             currentDisplayedOpState = selectedItem.Text;
-                             System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState: Reading OpState from selectedItem.Text (display index 0): '{currentDisplayedOpState}'");
-                        }
-                        else if (opStateDisplayIndex > 0 && selectedItem.SubItems.Count >= opStateDisplayIndex) { // Use >= because SubItems index is displayIndex - 1
-                             currentDisplayedOpState = selectedItem.SubItems[opStateDisplayIndex - 1].Text;
-                             System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState: Reading OpState from selectedItem.SubItems[{opStateDisplayIndex - 1}].Text: '{currentDisplayedOpState}'");
-                        }
-                        else
-                        {
-                            System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState: OpState column (display index {opStateDisplayIndex}) not found or SubItems too short for item {interfaceName}. SubItem count: {selectedItem.SubItems.Count}");
-                        }
-                    }
-                    else
-                    {
-                         System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState: OpState column (display index {opStateDisplayIndex}) not found or SubItems too short for item {interfaceName}. SubItem count: {selectedItem.SubItems.Count}");
-                    }
-                }
-                else
-                {
-                     System.Diagnostics.Debug.WriteLine("UpdateSelectedInterfacesConnectionState: OperationalState column key not found in visible columns.");
-                }
-
-                // Check Admin State - cannot connect/disconnect a disabled interface directly
-                int adminStateDisplayIndex = GetDisplayIndexOfColumnKey("AdminState");
-                string currentAdminState = string.Empty;
-                if (adminStateDisplayIndex != -1)
-                {
-                    if (adminStateDisplayIndex == 0) { currentAdminState = selectedItem.Text; }
-                    else if (adminStateDisplayIndex > 0 && selectedItem.SubItems.Count >= adminStateDisplayIndex)
-                    { currentAdminState = selectedItem.SubItems[adminStateDisplayIndex - 1].Text; }
-                }
-
-                if (currentAdminState.Equals("Disabled", StringComparison.OrdinalIgnoreCase))
-                {
-                    MessageBox.Show($"Interface '{interfaceName}' is Disabled. Please Enable it first before trying to { (connect ? "connect" : "disconnect") }.", "Interface Disabled", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} is disabled. Skipping { (connect ? "connect" : "disconnect") } operation.");
-                    continue;
-                }
-
-
-                bool alreadyInTargetState = !string.IsNullOrEmpty(currentDisplayedOpState) &&
-                                            (connect ? currentDisplayedOpState.Equals("Connected", StringComparison.OrdinalIgnoreCase)
-                                                     : currentDisplayedOpState.Equals("Disconnected", StringComparison.OrdinalIgnoreCase));
-                bool alreadyPending = !string.IsNullOrEmpty(currentDisplayedOpState) && currentDisplayedOpState.Equals(pendingStatusText, StringComparison.OrdinalIgnoreCase);
-
-                System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState: For item {interfaceName} - CurrentDisplayedOpState: '{currentDisplayedOpState}', TargetOpState: '{targetOpState}', IsAlreadyInTargetState: {alreadyInTargetState}, IsAlreadyPending: {alreadyPending}");
-
-                if (alreadyInTargetState || alreadyPending)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} is already {currentOperationPastTense} or pending '{targetOpState}' state. Skipping.");
-                    continue;
-                }
-
-                // Specific checks for connect/disconnect validity
-                if (connect && currentDisplayedOpState.Equals("Connected", StringComparison.OrdinalIgnoreCase))
-                {
-                    System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} is already Connected. Skipping connect operation.");
-                    continue;
-                }
-                if (!connect && currentDisplayedOpState.Equals("Disconnected", StringComparison.OrdinalIgnoreCase))
-                {
-                     System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} is already Disconnected. Skipping disconnect operation.");
-                    continue;
-                }
-                 // A "Non-operational" or "Operational" (but not "Connected") or other states might be valid to try to connect/disconnect from.
-                 // "Disabled" interfaces are handled above.
-
-                selectedItem.ForeColor = SystemColors.GrayText;
-                selectedItem.BackColor = SystemColors.ControlLight;
-                System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState: Set ForeColor=GrayText, BackColor=ControlLight for item {interfaceName}");
-
-                if (opStateDisplayIndex != -1)
-                {
-                    if (opStateDisplayIndex == 0)
-                    {
-                        selectedItem.Text = pendingStatusText;
-                        System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState: Set selectedItem.Text to '{pendingStatusText}' for item {interfaceName}");
-                    }
-                    else if (opStateDisplayIndex > 0 && selectedItem.SubItems.Count >= opStateDisplayIndex)
-                    {
-                         selectedItem.SubItems[opStateDisplayIndex -1].Text = pendingStatusText;
-                         System.Diagnostics.Debug.WriteLine($"UpdateSelectedInterfacesConnectionState: Set selectedItem.SubItems[{opStateDisplayIndex-1}].Text to '{pendingStatusText}' for item {interfaceName}");
-                    }
-                     else
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Warning: OpState column (display index {opStateDisplayIndex}) still not found in SubItems for item {interfaceName} when trying to write. SubItem count: {selectedItem.SubItems.Count}");
-                    }
-                }
-                else
-                {
-                     System.Diagnostics.Debug.WriteLine("Warning: OperationalState column is not visible, cannot set pending text for it.");
-                }
-
-                interfaceNamesToProcess.Add(interfaceName);
-            }
-
-            if (!interfaceNamesToProcess.Any())
-            {
-                System.Diagnostics.Debug.WriteLine("No interfaces needed processing for connect/disconnect after pre-checks.");
-                return;
-            }
-
-            foreach (string interfaceNameToProcess in interfaceNamesToProcess)
-            {
-                System.Diagnostics.Debug.WriteLine($"Attempting to {(connect ? "connect" : "disconnect")} interface: '{interfaceNameToProcess}'");
-                ExecuteNetshConnectCommand(interfaceNameToProcess, connect);
-            }
-            // The refresh is now primarily handled by the WMI/NetworkAddressChanged events,
-            // or by the _initialRefreshDelayTimer if it was started due to a state change that needs polling
-            // (e.g. enabling an interface).
-            // If ExecuteNetshConnectCommand itself causes an immediate state change detectable by WMI,
-            // then PopulateNetworkInterfaces will be called.
-            // If the change is subtle or takes time, polling might be needed, but "connect=yes/no"
-            // is usually more direct than "admin=enable" for its final state.
-            // Let's rely on the existing event handlers and the _initialRefreshDelayTimer initiated
-            // by UpdateSelectedInterfacesConnectionState if it still thinks polling is needed, or if
-            // the general network change events fire.
-            // No explicit timer start here needed *after* the loop, as ExecuteNetshConnectCommand is synchronous
-            // and the UI update for "Connecting..." is already done. The actual state will be reflected on the next auto-refresh.
-        }
-
-        private void ExecuteNetshConnectCommand(string interfaceName, bool connect)
-        {
-            System.Diagnostics.Debug.WriteLine($"ExecuteNetshConnectCommand: Interface='{interfaceName}', ConnectAction={connect}");
-            string arguments = $"interface set interface name=\"{interfaceName}\" {(connect ? "connect=yes" : "connect=no")}";
-            System.Diagnostics.Debug.WriteLine($"ExecuteNetshConnectCommand: Executing 'netsh.exe' with arguments: \"{arguments}\"");
+            System.Diagnostics.Debug.WriteLine($"ExecuteNetshWlanCommand: Executing 'netsh.exe' with arguments: \"{arguments}\"");
 
             ProcessStartInfo psi = new ProcessStartInfo("netsh", arguments)
             {
-                Verb = "runas", // Requires admin privileges
+                Verb = "runas",
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
-                UseShellExecute = true, // Necessary for 'runas'
+                UseShellExecute = true,
             };
 
             try
@@ -932,58 +760,260 @@ namespace NetworkManagerAppModern
                 {
                     if (process == null)
                     {
-                        MessageBox.Show($"Failed to start netsh process for interface '{interfaceName}' to {(connect ? "connect" : "disconnect")}.", "Process Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        MessageBox.Show($"Failed to start netsh process for Wi-Fi {action} on interface '{interfaceName}'.", "Process Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
                     }
-                    process.WaitForExit(); // Wait for the command to complete
-
-                    // Note: "netsh interface set interface ... connect=yes/no" might not always provide an immediate, reliable exit code
-                    // that directly correlates to the success of the connection/disconnection operation itself,
-                    // especially for Wi-Fi connections that involve profiles and association.
-                    // The exit code often reflects whether netsh could *issue* the command.
-                    // The actual state change might take time and is better observed via network events or polling.
+                    process.WaitForExit();
                     if (process.ExitCode != 0)
                     {
-                        // A non-zero exit code from netsh usually indicates an issue with the command itself
-                        // (e.g., interface not found, invalid parameter, or UAC denied if not handled by Win32Exception).
-                        string errorMsg = $"Netsh command to {(connect ? "connect" : "disconnect")} interface '{interfaceName}' failed with exit code: {process.ExitCode}.";
-                        System.Diagnostics.Debug.WriteLine(errorMsg);
-                        // Avoid showing a MessageBox here if it's a UAC denial, as that's handled by Win32Exception.
-                        // For other errors, a message box might be too intrusive if the user is performing bulk operations.
-                        // Consider logging or a less intrusive notification if this becomes noisy.
-                        // For now, let's show it for debugging.
-                        MessageBox.Show(errorMsg, "Netsh Command Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
-                    else
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Netsh command for '{interfaceName}' executed, exit code 0. Actual state change will be picked up by refresh/events.");
+                        string errorMsg = $"Netsh wlan {action} command for interface '{interfaceName}'" +
+                                          (connect ? $" (profile: {profileName})" : "") +
+                                          $" failed with exit code: {process.ExitCode}.";
+                        MessageBox.Show(errorMsg, "Netsh WLAN Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
             }
-            catch (System.ComponentModel.Win32Exception ex) // Catches UAC denial (NativeErrorCode 1223) and other Win32 errors
+            catch (System.ComponentModel.Win32Exception ex)
             {
-                string detailedError = $"Operation to {(connect ? "connect" : "disconnect")} interface '{interfaceName}' failed.\nWin32 Error Code: {ex.NativeErrorCode}\nMessage: {ex.Message}";
-                if (ex.NativeErrorCode == 1223) // ERROR_CANCELLED - User denied UAC prompt
+                string detailedError = $"Wi-Fi {action} operation for interface '{interfaceName}' failed.\nWin32 Error Code: {ex.NativeErrorCode}\nMessage: {ex.Message}";
+                if (ex.NativeErrorCode == 1223) // ERROR_CANCELLED
                 {
-                    detailedError = $"Operation for interface '{interfaceName}' was canceled by the user (UAC prompt denied).";
+                    detailedError = $"Wi-Fi {action} for interface '{interfaceName}' was canceled by the user (UAC prompt denied).";
                 }
                 MessageBox.Show(detailedError, "Operation Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                System.Diagnostics.Debug.WriteLine($"ExecuteNetshConnectCommand Win32Exception: {detailedError}");
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An unexpected error occurred while trying to {(connect ? "connect" : "disconnect")} interface '{interfaceName}': {ex.Message}", "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                System.Diagnostics.Debug.WriteLine($"ExecuteNetshConnectCommand Exception: {ex.Message}");
+                MessageBox.Show($"An unexpected error occurred while trying to {action} Wi-Fi on interface '{interfaceName}': {ex.Message}", "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-            finally
+        }
+
+
+        private void UpdateSelectedInterfacesConnectionState(bool connect)
+        {
+            if (listViewNetworkInterfaces.SelectedItems.Count == 0)
             {
-                // After attempting the command, trigger a refresh regardless of success/failure of the command itself,
-                // as the state might have changed or needs re-evaluation.
-                // The WMI/NetworkAddressChanged events should ideally pick this up, but a direct refresh can be useful.
-                // This might be redundant if the event system is quick and reliable.
-                // For now, let's rely on the timer started in UpdateSelectedInterfacesConnectionState or the global event handlers.
-                // If issues arise, consider adding:
-                // if (!_initialRefreshDelayTimer.Enabled) _initialRefreshDelayTimer.Start();
+                MessageBox.Show("Please select a Wi-Fi interface.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            ListViewItem selectedItem = listViewNetworkInterfaces.SelectedItems[0]; // Assuming single selection for connect/disconnect for simplicity now
+            if (!(selectedItem.Tag is string interfaceName)) return;
+
+            SimpleNetInterfaceInfo? netInfo = _lastKnownInterfaces.FirstOrDefault(i => i.Name == interfaceName);
+            if (netInfo == null || netInfo.NetType != NetworkInterfaceType.Wireless80211)
+            {
+                MessageBox.Show("Connect/Disconnect operations are only supported for Wi-Fi interfaces.", "Unsupported Interface", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (netInfo.AdminState?.Equals("Disabled", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                 MessageBox.Show($"Interface '{interfaceName}' is Disabled. Please Enable it first.", "Interface Disabled", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                 return;
+            }
+
+            // Pre-checks based on current operational state
+            if (connect && netInfo.OperationalState?.Equals("Connected", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                // Optionally, ask if they want to connect to a different profile, which might disconnect first.
+                // For simplicity now, just inform or allow trying (netsh might handle it or error).
+                // Let's allow the attempt, as user might be selecting a specific profile.
+                // If we want to be stricter:
+                // MessageBox.Show($"Interface '{interfaceName}' is already connected. Disconnect first to choose a different profile.", "Already Connected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                // PopulateNetworkInterfaces(true); // Refresh to clear any potential pending UI from a misclick
+                // return;
+                System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} is already connected. Proceeding with connect command, possibly to a new profile.");
+            }
+            else if (!connect && netInfo.OperationalState?.Equals("Disconnected", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                MessageBox.Show($"Interface '{interfaceName}' is already disconnected.", "Already Disconnected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                PopulateNetworkInterfaces(true); // Refresh to clear any potential pending UI
+                return;
+            }
+
+            // UI update for pending state (OperationalState column)
+            string pendingStatusText = connect ? "Connecting..." : "Disconnecting...";
+            int opStateDisplayIndex = GetDisplayIndexOfColumnKey("OperationalState");
+
+            if (opStateDisplayIndex != -1)
+            {
+                 if (opStateDisplayIndex == 0) selectedItem.Text = pendingStatusText;
+                 else if (opStateDisplayIndex > 0 && selectedItem.SubItems.Count >= opStateDisplayIndex)
+                 {
+                    selectedItem.SubItems[opStateDisplayIndex - 1].Text = pendingStatusText;
+                 }
+                 selectedItem.ForeColor = SystemColors.GrayText;
+                 selectedItem.BackColor = SystemColors.ControlLight;
+            }
+
+
+            if (connect)
+            {
+                List<string> profiles = GetWlanProfiles(interfaceName);
+                string? profileToConnect = null;
+
+                if (profiles.Count == 0)
+                {
+                    MessageBox.Show($"No Wi-Fi profiles found for interface '{interfaceName}'. Please add a profile in Windows settings.", "No Profiles", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // Revert pending UI state if needed, or let refresh handle it
+                    PopulateNetworkInterfaces(true); // Force refresh to clear pending state
+                    return;
+                }
+                else if (profiles.Count == 1)
+                {
+                    profileToConnect = profiles[0];
+                    System.Diagnostics.Debug.WriteLine($"Attempting to connect interface '{interfaceName}' using single available profile: '{profileToConnect}'");
+                }
+                else // Multiple profiles
+                {
+                    using (var profileDialog = new ProfileSelectionDialog(profiles))
+                    {
+                        if (profileDialog.ShowDialog(this) == DialogResult.OK)
+                        {
+                            profileToConnect = profileDialog.SelectedProfile;
+                            System.Diagnostics.Debug.WriteLine($"Attempting to connect interface '{interfaceName}' using selected profile: '{profileToConnect}'");
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"User cancelled profile selection for interface '{interfaceName}'.");
+                            PopulateNetworkInterfaces(true); // Force refresh to clear pending state
+                            return; // User cancelled
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(profileToConnect))
+                {
+                    ExecuteNetshWlanCommand(interfaceName, profileToConnect, true);
+                }
+            }
+            else // Disconnect
+            {
+                // Disconnect logic will be fully handled in the next step
+                System.Diagnostics.Debug.WriteLine($"Attempting to disconnect interface: '{interfaceName}' (Actual command in next step)");
+                 ExecuteNetshWlanCommand(interfaceName, null, false); // Placeholder call
+            }
+             // Rely on WMI/NetworkAddressChanged events to trigger PopulateNetworkInterfaces for final state update
+        }
+
+        private List<string> GetWlanProfiles(string interfaceName)
+        {
+            var profiles = new List<string>();
+            string commandArgs = $"wlan show profiles interface=\"{interfaceName}\"";
+            System.Diagnostics.Debug.WriteLine($"GetWlanProfiles: Executing 'netsh {commandArgs}'");
+
+            ProcessStartInfo psi = new ProcessStartInfo("netsh", commandArgs)
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = System.Text.Encoding.Default // Use default encoding which should handle most system outputs
+            };
+
+            try
+            {
+                using (Process? process = Process.Start(psi))
+                {
+                    if (process == null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"GetWlanProfiles: Process for '{interfaceName}' failed to start.");
+                        return profiles;
+                    }
+
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+                    System.Diagnostics.Debug.WriteLine($"GetWlanProfiles: Raw output for '{interfaceName}':\n{output}");
+
+                    // Example output:
+                    // Profiles on interface Wi-Fi:
+                    // Group policy profiles (read only)
+                    // ---------------------------------
+                    //     <None>
+                    // User profiles
+                    // -------------
+                    //     All User Profile     : MyWifiProfile1
+                    //     All User Profile     : AnotherProfile
+                    //
+                    // We are interested in lines like "    All User Profile     : ProfileName"
+                    // Or sometimes it might just be "    User_profile_name" under "Profiles on interface..." directly
+                    // A more robust regex might be needed if format varies significantly.
+                    // Current regex looks for " : " followed by the profile name.
+
+                    var lines = output.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+                    bool profilesSectionStarted = false; // Might not be strictly needed with current regex
+
+                    foreach (var line in lines)
+                    {
+                        if (line.Contains("Profiles on interface")) // Good starting point
+                        {
+                            profilesSectionStarted = true;
+                            continue;
+                        }
+
+                        if (profilesSectionStarted) // Process lines after the header
+                        {
+                            var match = Regex.Match(line, @":\s*(.+)$"); // Look for " : " and capture what's after
+                            if (match.Success)
+                            {
+                                string profileName = match.Groups[1].Value.Trim();
+                                if (!string.IsNullOrEmpty(profileName) && !profileName.Equals("<None>", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    profiles.Add(profileName);
+                                    System.Diagnostics.Debug.WriteLine($"GetWlanProfiles: Found profile '{profileName}'");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetWlanProfiles: Exception for '{interfaceName}': {ex.Message}");
+                MessageBox.Show($"Error fetching WLAN profiles for {interfaceName}: {ex.Message}", "WLAN Profile Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+
+            return profiles.Distinct().ToList(); // Ensure uniqueness
+        }
+
+        private void ListViewNetworkInterfaces_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            if (listViewNetworkInterfaces.SelectedItems.Count > 0)
+            {
+                ListViewItem selectedItem = listViewNetworkInterfaces.SelectedItems[0];
+                if (selectedItem.Tag is string interfaceName)
+                {
+                    // Find the corresponding SimpleNetInterfaceInfo object to get its type
+                    // This requires SimpleNetInterfaceInfo to store NetworkInterfaceType,
+                    // which will be addressed in the next step.
+                    // For now, we'll use a placeholder logic.
+                    SimpleNetInterfaceInfo? netInfo = _lastKnownInterfaces.FirstOrDefault(i => i.Name == interfaceName);
+
+                    if (netInfo != null && netInfo.NetType == NetworkInterfaceType.Wireless80211) // Compare enum directly
+                    {
+                        btnConnectSelected.Visible = true;
+                        btnDisconnectSelected.Visible = true;
+                        // Also, wire up event handlers for Connect/Disconnect if not already done
+                        // We'll do this once in the constructor or ensure they are always wired.
+                        // For now, assume they will be wired.
+                    }
+                    else
+                    {
+                        btnConnectSelected.Visible = false;
+                        btnDisconnectSelected.Visible = false;
+                    }
+                }
+                else
+                {
+                    btnConnectSelected.Visible = false;
+                    btnDisconnectSelected.Visible = false;
+                }
+            }
+            else
+            {
+                // No item selected, hide buttons
+                btnConnectSelected.Visible = false;
+                btnDisconnectSelected.Visible = false;
             }
         }
 

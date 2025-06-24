@@ -132,6 +132,7 @@ namespace NetworkManagerAppModern
             this.btnConnectSelected.Size = new System.Drawing.Size(110, 23);
             this.btnConnectSelected.Text = "Connect Selected";
             this.btnConnectSelected.UseVisualStyleBackColor = true;
+            this.btnConnectSelected.Visible = false; // Initially hidden
             //
             // btnDisconnectSelected
             //
@@ -141,6 +142,7 @@ namespace NetworkManagerAppModern
             this.btnDisconnectSelected.Size = new System.Drawing.Size(120, 23); // Slightly wider for "Disconnect"
             this.btnDisconnectSelected.Text = "Disconnect Selected";
             this.btnDisconnectSelected.UseVisualStyleBackColor = true;
+            this.btnDisconnectSelected.Visible = false; // Initially hidden
 
             this.btnSelectColumns.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnSelectColumns.Location = new System.Drawing.Point(688, 405);
