@@ -5,9 +5,11 @@ using System.Net.NetworkInformation; // Required for network interface access
 using System.Diagnostics; // Required for Process
 using System.Collections.Generic; // For List<T>
 using System.Linq; // For LINQ operations
+using System.Threading.Tasks; // For Task
 
 using System.Text.RegularExpressions; // For parsing netsh output
 using System.Management; // For WMI event watcher
+using Windows.Devices.Geolocation; // For Geolocator
 
 namespace NetworkManagerAppModern
 {
@@ -18,7 +20,8 @@ namespace NetworkManagerAppModern
         public string AdminState { get; set; } = string.Empty; // e.g., "Enabled", "Disabled"
         public string OperationalState { get; set; } = string.Empty; // e.g., "Connected", "Disconnected"
         public string? Description { get; set; } // Optional: from NetworkInterface object
-        public string? Type { get; set; } // Optional
+        // public string? Type { get; set; } // Optional - Replaced by NetType
+        public NetworkInterfaceType? NetType { get; set; } // To store the actual enum type
         public string? Id { get; set; } // Optional
 
         // We will primarily rely on Name for enabling/disabling via netsh
@@ -30,7 +33,7 @@ namespace NetworkManagerAppModern
         public string Key { get; }
         public string HeaderText { get; }
         public int DefaultWidth { get; }
-        public Func<SimpleNetInterfaceInfo, string> ValueGetter { get; } // Changed type here
+        public Func<SimpleNetInterfaceInfo, string> ValueGetter { get; }
 
         public ColumnDefinition(string key, string headerText, int defaultWidth, Func<SimpleNetInterfaceInfo, string> valueGetter)
         {
@@ -92,7 +95,11 @@ namespace NetworkManagerAppModern
             this.btnRefreshList.Click += new System.EventHandler(this.BtnRefreshList_Click);
             this.btnEnableSelected.Click += new System.EventHandler(this.BtnEnableSelected_Click);
             this.btnDisableSelected.Click += new System.EventHandler(this.BtnDisableSelected_Click);
+            // Event handlers for new buttons
+            this.btnConnectSelected.Click += new System.EventHandler(this.BtnConnectSelected_Click);
+            this.btnDisconnectSelected.Click += new System.EventHandler(this.BtnDisconnectSelected_Click);
             this.btnSelectColumns.Click += new System.EventHandler(this.BtnSelectColumns_Click);
+            this.listViewNetworkInterfaces.SelectedIndexChanged += new System.EventHandler(this.ListViewNetworkInterfaces_SelectedIndexChanged);
 
             PopulateNetworkInterfaces(); // Initial population
 
@@ -375,7 +382,7 @@ namespace NetworkManagerAppModern
                 new ColumnDefinition("AdminState", "Admin State", 100, info => info.AdminState),
                 new ColumnDefinition("OperationalState", "Op. Status", 120, info => info.OperationalState),
                 new ColumnDefinition("Description", "Description", 250, info => info.Description ?? ""),
-                new ColumnDefinition("Type", "Type", 100, info => info.Type ?? ""),
+                new ColumnDefinition("Type", "Type", 100, info => info.NetType?.ToString() ?? ""), // Updated to use NetType
                 new ColumnDefinition("ID", "ID", 200, info => info.Id ?? ""),
             };
             LoadColumnSettings();
@@ -544,10 +551,9 @@ namespace NetworkManagerAppModern
             SetupListViewColumns();
             listViewNetworkInterfaces.Items.Clear();
 
-            _lastKnownInterfaces = new List<SimpleNetInterfaceInfo>(netshInterfaces.Select(ni => new SimpleNetInterfaceInfo {
-                Name = ni.Name, AdminState = ni.AdminState, OperationalState = ni.OperationalState,
-                Description = ni.Description, Id = ni.Id, Type = ni.Type
-            }));
+            // Temporary list to build fully populated interface info
+            var fullyPopulatedInterfaces = new List<SimpleNetInterfaceInfo>();
+
 
             Dictionary<string, NetworkInterface> systemInterfaces = new Dictionary<string, NetworkInterface>();
             try
@@ -582,7 +588,7 @@ namespace NetworkManagerAppModern
                 if (systemInterfaces.TryGetValue(displayInfo.Name, out NetworkInterface? systemAdapter))
                 {
                     displayInfo.Description = systemAdapter.Description;
-                    displayInfo.Type = systemAdapter.NetworkInterfaceType.ToString();
+                    displayInfo.NetType = systemAdapter.NetworkInterfaceType; // Store the enum
                     displayInfo.Id = systemAdapter.Id;
                 }
 
@@ -648,7 +654,10 @@ namespace NetworkManagerAppModern
                     }
                 }
                 listViewNetworkInterfaces.Items.Add(item);
+                fullyPopulatedInterfaces.Add(displayInfo); // Add the fully populated info
             }
+
+            _lastKnownInterfaces = fullyPopulatedInterfaces; // Assign the fully populated list
 
             // Restore selection
             if (!string.IsNullOrEmpty(previouslySelectedInterfaceName))
@@ -706,6 +715,368 @@ namespace NetworkManagerAppModern
         private void BtnDisableSelected_Click(object? sender, EventArgs e)
         {
             UpdateSelectedInterfaces(false);
+        }
+
+        private async Task<bool> IsLocationServiceEnabledAsync()
+        {
+            try
+            {
+                var accessStatus = await Geolocator.RequestAccessAsync();
+
+                switch (accessStatus)
+                {
+                    case GeolocationAccessStatus.Allowed:
+                        var geolocator = new Geolocator();
+                        geolocator.DesiredAccuracy = PositionAccuracy.Default;
+                        var pos=await geolocator.GetGeopositionAsync();
+
+                        System.Diagnostics.Debug.WriteLine($"Location access reported as Allowed. Checking LocationStatus: {geolocator.LocationStatus}");
+                        // Only consider it truly enabled if the status is Ready.
+                        // Other statuses like Initializing, NoData, or even if it's Allowed but Disabled/NotAvailable globally.
+
+                        if (geolocator.LocationStatus == PositionStatus.NotInitialized)
+                        {
+                            System.Diagnostics.Debug.WriteLine("LocationStatus is NotInitialized, but we don't care.");
+                            return true;
+                        }
+                        else if (geolocator.LocationStatus == PositionStatus.Ready)
+                        {
+                            System.Diagnostics.Debug.WriteLine("LocationStatus is Ready.");
+                            return true;
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"LocationStatus is {geolocator.LocationStatus}, not Ready. Treating as disabled/unavailable.");
+                            return false;
+                        }
+
+                    case GeolocationAccessStatus.Denied:
+                        System.Diagnostics.Debug.WriteLine("Location access denied by user or policy.");
+                        return false;
+
+                    case GeolocationAccessStatus.Unspecified:
+                        System.Diagnostics.Debug.WriteLine("Location access unspecified or error.");
+                        return false;
+                        // This can also mean location is turned off in settings,
+                        // or the system doesn't have location capabilities.
+                }
+            }
+            catch (Exception ex)
+            {
+                // This can happen if the location service is completely unavailable or due to other system issues.
+                System.Diagnostics.Debug.WriteLine($"Error checking location status: {ex.Message}");
+                return false; // Assume not enabled or error
+            }
+            return false; // Default to false
+        }
+
+
+        private void BtnConnectSelected_Click(object? sender, EventArgs e)
+        {
+            UpdateSelectedInterfacesConnectionState(true);
+        }
+
+        private void BtnDisconnectSelected_Click(object? sender, EventArgs e)
+        {
+            // To be implemented in the next step (Implement Disconnect Logic)
+            UpdateSelectedInterfacesConnectionState(false);
+        }
+
+
+        private void ExecuteNetshWlanCommand(string interfaceName, string? profileName, bool connect)
+        {
+            string action = connect ? "connect" : "disconnect";
+            string arguments;
+
+            if (connect)
+            {
+                if (string.IsNullOrEmpty(profileName))
+                {
+                    MessageBox.Show($"No profile specified to connect Wi-Fi interface '{interfaceName}'.", "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                arguments = $"wlan connect name=\"{profileName}\" interface=\"{interfaceName}\"";
+            }
+            else // Disconnect
+            {
+                arguments = $"wlan disconnect interface=\"{interfaceName}\"";
+            }
+
+            System.Diagnostics.Debug.WriteLine($"ExecuteNetshWlanCommand: Executing 'netsh.exe' with arguments: \"{arguments}\"");
+
+            ProcessStartInfo psi = new ProcessStartInfo("netsh", arguments)
+            {
+                Verb = "runas",
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                UseShellExecute = true,
+            };
+
+            try
+            {
+                using (Process? process = Process.Start(psi))
+                {
+                    if (process == null)
+                    {
+                        MessageBox.Show($"Failed to start netsh process for Wi-Fi {action} on interface '{interfaceName}'.", "Process Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                    process.WaitForExit();
+                    if (process.ExitCode != 0)
+                    {
+                        string errorMsg = $"Netsh wlan {action} command for interface '{interfaceName}'" +
+                                          (connect ? $" (profile: {profileName})" : "") +
+                                          $" failed with exit code: {process.ExitCode}.";
+                        MessageBox.Show(errorMsg, "Netsh WLAN Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                string detailedError = $"Wi-Fi {action} operation for interface '{interfaceName}' failed.\nWin32 Error Code: {ex.NativeErrorCode}\nMessage: {ex.Message}";
+                if (ex.NativeErrorCode == 1223) // ERROR_CANCELLED
+                {
+                    detailedError = $"Wi-Fi {action} for interface '{interfaceName}' was canceled by the user (UAC prompt denied).";
+                }
+                MessageBox.Show(detailedError, "Operation Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"An unexpected error occurred while trying to {action} Wi-Fi on interface '{interfaceName}': {ex.Message}", "Unexpected Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+
+        private void UpdateSelectedInterfacesConnectionState(bool connect)
+        {
+            if (listViewNetworkInterfaces.SelectedItems.Count == 0)
+            {
+                MessageBox.Show("Please select a Wi-Fi interface.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            ListViewItem selectedItem = listViewNetworkInterfaces.SelectedItems[0]; // Assuming single selection for connect/disconnect for simplicity now
+            if (!(selectedItem.Tag is string interfaceName)) return;
+
+            SimpleNetInterfaceInfo? netInfo = _lastKnownInterfaces.FirstOrDefault(i => i.Name == interfaceName);
+            if (netInfo == null || netInfo.NetType != NetworkInterfaceType.Wireless80211)
+            {
+                MessageBox.Show("Connect/Disconnect operations are only supported for Wi-Fi interfaces.", "Unsupported Interface", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (netInfo.AdminState?.Equals("Disabled", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                 MessageBox.Show($"Interface '{interfaceName}' is Disabled. Please Enable it first.", "Interface Disabled", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                 return;
+            }
+
+            // Pre-checks based on current operational state
+            if (connect && netInfo.OperationalState?.Equals("Connected", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                // Optionally, ask if they want to connect to a different profile, which might disconnect first.
+                // For simplicity now, just inform or allow trying (netsh might handle it or error).
+                // Let's allow the attempt, as user might be selecting a specific profile.
+                // If we want to be stricter:
+                // MessageBox.Show($"Interface '{interfaceName}' is already connected. Disconnect first to choose a different profile.", "Already Connected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                // PopulateNetworkInterfaces(true); // Refresh to clear any potential pending UI from a misclick
+                // return;
+                System.Diagnostics.Debug.WriteLine($"Interface {interfaceName} is already connected. Proceeding with connect command, possibly to a new profile.");
+            }
+            else if (!connect && netInfo.OperationalState?.Equals("Disconnected", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                MessageBox.Show($"Interface '{interfaceName}' is already disconnected.", "Already Disconnected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                PopulateNetworkInterfaces(true); // Refresh to clear any potential pending UI
+                return;
+            }
+
+            // UI update for pending state (OperationalState column)
+            string pendingStatusText = connect ? "Connecting..." : "Disconnecting...";
+            int opStateDisplayIndex = GetDisplayIndexOfColumnKey("OperationalState");
+
+            if (opStateDisplayIndex != -1)
+            {
+                 if (opStateDisplayIndex == 0) selectedItem.Text = pendingStatusText;
+                 else if (opStateDisplayIndex > 0 && selectedItem.SubItems.Count >= opStateDisplayIndex)
+                 {
+                    selectedItem.SubItems[opStateDisplayIndex].Text = pendingStatusText;
+                 }
+                 selectedItem.ForeColor = SystemColors.GrayText;
+                 selectedItem.BackColor = SystemColors.ControlLight;
+            }
+
+
+            if (connect)
+            {
+                List<string> profiles = GetWlanProfiles(interfaceName);
+                string? profileToConnect = null;
+
+                if (profiles.Count == 0)
+                {
+                    MessageBox.Show($"No Wi-Fi profiles found for interface '{interfaceName}'. Please add a profile in Windows settings.", "No Profiles", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // Revert pending UI state if needed, or let refresh handle it
+                    PopulateNetworkInterfaces(true); // Force refresh to clear pending state
+                    return;
+                }
+                else if (profiles.Count == 1)
+                {
+                    profileToConnect = profiles[0];
+                    System.Diagnostics.Debug.WriteLine($"Attempting to connect interface '{interfaceName}' using single available profile: '{profileToConnect}'");
+                }
+                else // Multiple profiles
+                {
+                    using (var profileDialog = new ProfileSelectionDialog(profiles))
+                    {
+                        if (profileDialog.ShowDialog(this) == DialogResult.OK)
+                        {
+                            profileToConnect = profileDialog.SelectedProfile;
+                            System.Diagnostics.Debug.WriteLine($"Attempting to connect interface '{interfaceName}' using selected profile: '{profileToConnect}'");
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"User cancelled profile selection for interface '{interfaceName}'.");
+                            PopulateNetworkInterfaces(true); // Force refresh to clear pending state
+                            return; // User cancelled
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(profileToConnect))
+                {
+                    ExecuteNetshWlanCommand(interfaceName, profileToConnect, true);
+                }
+            }
+            else // Disconnect
+            {
+                // Disconnect logic will be fully handled in the next step
+                System.Diagnostics.Debug.WriteLine($"Attempting to disconnect interface: '{interfaceName}' (Actual command in next step)");
+                 ExecuteNetshWlanCommand(interfaceName, null, false); // Placeholder call
+            }
+             // Rely on WMI/NetworkAddressChanged events to trigger PopulateNetworkInterfaces for final state update
+        }
+
+        private List<string> GetWlanProfiles(string interfaceName)
+        {
+            var profiles = new List<string>();
+            string commandArgs = $"wlan show profiles interface=\"{interfaceName}\"";
+            System.Diagnostics.Debug.WriteLine($"GetWlanProfiles: Executing 'netsh {commandArgs}'");
+
+            ProcessStartInfo psi = new ProcessStartInfo("netsh", commandArgs)
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = System.Text.Encoding.Default // Use default encoding which should handle most system outputs
+            };
+
+            try
+            {
+                using (Process? process = Process.Start(psi))
+                {
+                    if (process == null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"GetWlanProfiles: Process for '{interfaceName}' failed to start.");
+                        return profiles;
+                    }
+
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+                    System.Diagnostics.Debug.WriteLine($"GetWlanProfiles: Raw output for '{interfaceName}':\n{output}");
+
+                    // Example output:
+                    // Profiles on interface Wi-Fi:
+                    // Group policy profiles (read only)
+                    // ---------------------------------
+                    //     <None>
+                    // User profiles
+                    // -------------
+                    //     All User Profile     : MyWifiProfile1
+                    //     All User Profile     : AnotherProfile
+                    //
+                    // We are interested in lines like "    All User Profile     : ProfileName"
+                    // Or sometimes it might just be "    User_profile_name" under "Profiles on interface..." directly
+                    // A more robust regex might be needed if format varies significantly.
+                    // Current regex looks for " : " followed by the profile name.
+
+                    var lines = output.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+                    bool profilesSectionStarted = false; // Might not be strictly needed with current regex
+
+                    foreach (var line in lines)
+                    {
+                        if (line.Contains("Profiles on interface")) // Good starting point
+                        {
+                            profilesSectionStarted = true;
+                            continue;
+                        }
+
+                        if (profilesSectionStarted) // Process lines after the header
+                        {
+                            var match = Regex.Match(line, @":\s*(.+)$"); // Look for " : " and capture what's after
+                            if (match.Success)
+                            {
+                                string profileName = match.Groups[1].Value.Trim();
+                                if (!string.IsNullOrEmpty(profileName) && !profileName.Equals("<None>", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    profiles.Add(profileName);
+                                    System.Diagnostics.Debug.WriteLine($"GetWlanProfiles: Found profile '{profileName}'");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetWlanProfiles: Exception for '{interfaceName}': {ex.Message}");
+                MessageBox.Show($"Error fetching WLAN profiles for {interfaceName}: {ex.Message}", "WLAN Profile Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+
+            return profiles.Distinct().ToList(); // Ensure uniqueness
+        }
+
+        private async void ListViewNetworkInterfaces_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            // Default to hiding buttons
+            btnConnectSelected.Visible = false;
+            btnDisconnectSelected.Visible = false;
+
+            if (listViewNetworkInterfaces.SelectedItems.Count > 0)
+            {
+                ListViewItem selectedItem = listViewNetworkInterfaces.SelectedItems[0];
+                if (selectedItem.Tag is string interfaceName)
+                {
+                    // Find the corresponding SimpleNetInterfaceInfo object to get its type
+                    // This requires SimpleNetInterfaceInfo to store NetworkInterfaceType,
+                    // which will be addressed in the next step.
+                    // For now, we'll use a placeholder logic.
+                    SimpleNetInterfaceInfo? netInfo = _lastKnownInterfaces.FirstOrDefault(i => i.Name == interfaceName);
+
+                    if (netInfo != null && netInfo.NetType == NetworkInterfaceType.Wireless80211 && await IsLocationServiceEnabledAsync()) // Compare enum directly
+                    {
+                        btnConnectSelected.Visible = true;
+                        btnDisconnectSelected.Visible = true;
+                        // Also, wire up event handlers for Connect/Disconnect if not already done
+                        // We'll do this once in the constructor or ensure they are always wired.
+                        // For now, assume they will be wired.
+                    }
+                    else
+                    {
+                        btnConnectSelected.Visible = false;
+                        btnDisconnectSelected.Visible = false;
+                    }
+                }
+                else
+                {
+                    btnConnectSelected.Visible = false;
+                    btnDisconnectSelected.Visible = false;
+                }
+            }
+            else
+            {
+                // No item selected, hide buttons
+                btnConnectSelected.Visible = false;
+                btnDisconnectSelected.Visible = false;
+            }
         }
 
         // Helper method to find the display index of a column based on its key
