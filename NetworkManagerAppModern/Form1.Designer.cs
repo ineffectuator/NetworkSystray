@@ -123,11 +123,34 @@ namespace NetworkManagerAppModern
             this.btnDisableSelected.Text = "Disable Selected";
             this.btnDisableSelected.UseVisualStyleBackColor = true;
 
+            //
+            // btnConnectSelected
+            //
+            this.btnConnectSelected = new System.Windows.Forms.Button();
+            this.btnConnectSelected.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.btnConnectSelected.Location = new System.Drawing.Point(350, 405); // Adjusted location
+            this.btnConnectSelected.Size = new System.Drawing.Size(110, 23);
+            this.btnConnectSelected.Text = "Connect Selected";
+            this.btnConnectSelected.UseVisualStyleBackColor = true;
+            //
+            // btnDisconnectSelected
+            //
+            this.btnDisconnectSelected = new System.Windows.Forms.Button();
+            this.btnDisconnectSelected.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.btnDisconnectSelected.Location = new System.Drawing.Point(466, 405); // Adjusted location
+            this.btnDisconnectSelected.Size = new System.Drawing.Size(120, 23); // Slightly wider for "Disconnect"
+            this.btnDisconnectSelected.Text = "Disconnect Selected";
+            this.btnDisconnectSelected.UseVisualStyleBackColor = true;
+
             this.btnSelectColumns.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnSelectColumns.Location = new System.Drawing.Point(688, 405);
             this.btnSelectColumns.Size = new System.Drawing.Size(100, 23);
             this.btnSelectColumns.Text = "Select Columns";
             this.btnSelectColumns.UseVisualStyleBackColor = true;
+
+            // Add new buttons to Controls collection
+            this.Controls.Add(this.btnConnectSelected);
+            this.Controls.Add(this.btnDisconnectSelected);
 
             this.contextMenuStrip1.ResumeLayout(false);
             this.ResumeLayout(false);
@@ -147,6 +170,8 @@ namespace NetworkManagerAppModern
         private System.Windows.Forms.Button btnRefreshList;
         private System.Windows.Forms.Button btnEnableSelected;
         private System.Windows.Forms.Button btnDisableSelected;
+        private System.Windows.Forms.Button btnConnectSelected; // Declaration
+        private System.Windows.Forms.Button btnDisconnectSelected; // Declaration
         private System.Windows.Forms.Button btnSelectColumns;
     }
 }
