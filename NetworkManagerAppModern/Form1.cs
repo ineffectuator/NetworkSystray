@@ -727,10 +727,19 @@ namespace NetworkManagerAppModern
                 switch (accessStatus)
                 {
                     case GeolocationAccessStatus.Allowed:
-                        System.Diagnostics.Debug.WriteLine("Location access is allowed.");
-                        // Further check if location is actually usable (e.g., not disabled in system settings)
-                        return geolocator.LocationStatus != PositionStatus.Disabled &&
-                               geolocator.LocationStatus != PositionStatus.NotAvailable;
+                        System.Diagnostics.Debug.WriteLine($"Location access reported as Allowed. Checking LocationStatus: {geolocator.LocationStatus}");
+                        // Only consider it truly enabled if the status is Ready.
+                        // Other statuses like Initializing, NoData, or even if it's Allowed but Disabled/NotAvailable globally.
+                        if (geolocator.LocationStatus == PositionStatus.Ready)
+                        {
+                            System.Diagnostics.Debug.WriteLine("LocationStatus is Ready.");
+                            return true;
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"LocationStatus is {geolocator.LocationStatus}, not Ready. Treating as disabled/unavailable.");
+                            return false;
+                        }
 
                     case GeolocationAccessStatus.Denied:
                         System.Diagnostics.Debug.WriteLine("Location access denied by user or policy.");
