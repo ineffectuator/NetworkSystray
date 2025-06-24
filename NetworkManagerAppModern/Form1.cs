@@ -5,9 +5,11 @@ using System.Net.NetworkInformation; // Required for network interface access
 using System.Diagnostics; // Required for Process
 using System.Collections.Generic; // For List<T>
 using System.Linq; // For LINQ operations
+using System.Threading.Tasks; // For Task
 
 using System.Text.RegularExpressions; // For parsing netsh output
 using System.Management; // For WMI event watcher
+using Windows.Devices.Geolocation; // For Geolocator
 
 namespace NetworkManagerAppModern
 {
@@ -714,6 +716,42 @@ namespace NetworkManagerAppModern
         {
             UpdateSelectedInterfaces(false);
         }
+
+        private async Task<bool> IsLocationServiceEnabledAsync()
+        {
+            try
+            {
+                var geolocator = new Geolocator();
+                var accessStatus = await Geolocator.RequestAccessAsync();
+
+                switch (accessStatus)
+                {
+                    case GeolocationAccessStatus.Allowed:
+                        System.Diagnostics.Debug.WriteLine("Location access is allowed.");
+                        // Further check if location is actually usable (e.g., not disabled in system settings)
+                        return geolocator.LocationStatus != PositionStatus.Disabled &&
+                               geolocator.LocationStatus != PositionStatus.NotAvailable;
+
+                    case GeolocationAccessStatus.Denied:
+                        System.Diagnostics.Debug.WriteLine("Location access denied by user or policy.");
+                        return false;
+
+                    case GeolocationAccessStatus.Unspecified:
+                        System.Diagnostics.Debug.WriteLine("Location access unspecified or error.");
+                        return false;
+                        // This can also mean location is turned off in settings,
+                        // or the system doesn't have location capabilities.
+                }
+            }
+            catch (Exception ex)
+            {
+                // This can happen if the location service is completely unavailable or due to other system issues.
+                System.Diagnostics.Debug.WriteLine($"Error checking location status: {ex.Message}");
+                return false; // Assume not enabled or error
+            }
+            return false; // Default to false
+        }
+
 
         private void BtnConnectSelected_Click(object? sender, EventArgs e)
         {
