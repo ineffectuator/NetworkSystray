@@ -549,10 +549,9 @@ namespace NetworkManagerAppModern
             SetupListViewColumns();
             listViewNetworkInterfaces.Items.Clear();
 
-            _lastKnownInterfaces = new List<SimpleNetInterfaceInfo>(netshInterfaces.Select(ni => new SimpleNetInterfaceInfo {
-                Name = ni.Name, AdminState = ni.AdminState, OperationalState = ni.OperationalState,
-                Description = ni.Description, Id = ni.Id, NetType = ni.NetType // Ensure NetType is copied if available from netsh parsing (though unlikely)
-            }));
+            // Temporary list to build fully populated interface info
+            var fullyPopulatedInterfaces = new List<SimpleNetInterfaceInfo>();
+
 
             Dictionary<string, NetworkInterface> systemInterfaces = new Dictionary<string, NetworkInterface>();
             try
@@ -653,7 +652,10 @@ namespace NetworkManagerAppModern
                     }
                 }
                 listViewNetworkInterfaces.Items.Add(item);
+                fullyPopulatedInterfaces.Add(displayInfo); // Add the fully populated info
             }
+
+            _lastKnownInterfaces = fullyPopulatedInterfaces; // Assign the fully populated list
 
             // Restore selection
             if (!string.IsNullOrEmpty(previouslySelectedInterfaceName))
