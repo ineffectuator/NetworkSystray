@@ -1027,6 +1027,10 @@ namespace NetworkManagerAppModern
 
         private void ListViewNetworkInterfaces_SelectedIndexChanged(object? sender, EventArgs e)
         {
+            // Default to hiding buttons
+            btnConnectSelected.Visible = false;
+            btnDisconnectSelected.Visible = false;
+
             if (listViewNetworkInterfaces.SelectedItems.Count > 0)
             {
                 ListViewItem selectedItem = listViewNetworkInterfaces.SelectedItems[0];
