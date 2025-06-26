@@ -1,0 +1,59 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Fragment>
+        <DirectoryRef Id="INSTALLFOLDER">
+            <Component Id="Microsoft.Windows.SDK.NET.dll" Guid="{D939E056-A010-454C-BB21-DC21E1C869D5}">
+                <File Id="Microsoft.Windows.SDK.NET.dll" KeyPath="yes" Source="$(var.SourceDir)\Microsoft.Windows.SDK.NET.dll" />
+            </Component>
+            <Component Id="NetworkManagerAppModern.deps.json" Guid="{78316323-23E2-495B-8C2F-452C9B5DE6FA}">
+                <File Id="NetworkManagerAppModern.deps.json" KeyPath="yes" Source="$(var.SourceDir)\NetworkManagerAppModern.deps.json" />
+            </Component>
+            <Component Id="NetworkManagerAppModern.dll" Guid="{A8CE9747-1B45-4DED-A875-23B291592459}">
+                <File Id="NetworkManagerAppModern.dll" KeyPath="yes" Source="$(var.SourceDir)\NetworkManagerAppModern.dll" />
+            </Component>
+            <Component Id="NetworkManagerAppModern.exe" Guid="{395F073D-7E3B-49A1-89C1-6A11DDEB9AC5}">
+                <File Id="NetworkManagerAppModern.exe" KeyPath="yes" Source="$(var.SourceDir)\NetworkManagerAppModern.exe" />
+            </Component>
+            <Component Id="NetworkManagerAppModern.pdb" Guid="{7F55DBF9-9DE9-4951-98A0-5165F69E56B4}">
+                <File Id="NetworkManagerAppModern.pdb" KeyPath="yes" Source="$(var.SourceDir)\NetworkManagerAppModern.pdb" />
+            </Component>
+            <Component Id="NetworkManagerAppModern.runtimeconfig.json" Guid="{103F0D4A-EABA-4917-B842-C3A4C0D74E57}">
+                <File Id="NetworkManagerAppModern.runtimeconfig.json" KeyPath="yes" Source="$(var.SourceDir)\NetworkManagerAppModern.runtimeconfig.json" />
+            </Component>
+            <Component Id="System.CodeDom.dll" Guid="{ED914653-8AA9-49DD-82E9-55E1E34A8F1C}">
+                <File Id="System.CodeDom.dll" KeyPath="yes" Source="$(var.SourceDir)\System.CodeDom.dll" />
+            </Component>
+            <Component Id="System.Management.dll" Guid="{851E9B6E-C8D5-4C63-A762-2CE5D0EE39BE}">
+                <File Id="System.Management.dll" KeyPath="yes" Source="$(var.SourceDir)\System.Management.dll" />
+            </Component>
+            <Component Id="WinRT.Runtime.dll" Guid="{A2B889A1-13CB-4CCF-846E-A6A8E320F2D1}">
+                <File Id="WinRT.Runtime.dll" KeyPath="yes" Source="$(var.SourceDir)\WinRT.Runtime.dll" />
+            </Component>
+            <Directory Id="runtimes" Name="runtimes">
+                <Directory Id="win" Name="win">
+                    <Directory Id="lib" Name="lib">
+                        <Directory Id="net8.0" Name="net8.0">
+                            <Component Id="System.Management.dll_1" Guid="{6E0CBF51-4A3B-48FB-B71A-0E9B0EB5F613}">
+                                <File Id="System.Management.dll_1" KeyPath="yes" Source="$(var.SourceDir)\runtimes\win\lib\net8.0\System.Management.dll" />
+                            </Component>
+                        </Directory>
+                    </Directory>
+                </Directory>
+            </Directory>
+        </DirectoryRef>
+    </Fragment>
+    <Fragment>
+        <ComponentGroup Id="ProductComponents">
+            <ComponentRef Id="Microsoft.Windows.SDK.NET.dll" />
+            <ComponentRef Id="NetworkManagerAppModern.deps.json" />
+            <ComponentRef Id="NetworkManagerAppModern.dll" />
+            <ComponentRef Id="NetworkManagerAppModern.exe" />
+            <ComponentRef Id="NetworkManagerAppModern.pdb" />
+            <ComponentRef Id="NetworkManagerAppModern.runtimeconfig.json" />
+            <ComponentRef Id="System.CodeDom.dll" />
+            <ComponentRef Id="System.Management.dll" />
+            <ComponentRef Id="WinRT.Runtime.dll" />
+            <ComponentRef Id="System.Management.dll_1" />
+        </ComponentGroup>
+    </Fragment>
+</Wix>
