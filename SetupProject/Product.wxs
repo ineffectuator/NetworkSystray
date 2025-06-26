@@ -24,12 +24,7 @@
       <Component Id="NetworkManagerAppModern.exe" Guid="*">
         <File Id="NetworkManagerAppModern.exe" Source="..\NetworkManagerAppModern\bin\Release\net8.0-windows10.0.19041.0\NetworkManagerAppModern.exe" KeyPath="yes" Checksum="yes"/>
       </Component>
-      <Component Id="SomeDependency.dll" Guid="*">
-        <File Id="SomeDependency.dll" Source="..\NetworkManagerAppModern\bin\Release\net8.0-windows10.0.19041.0\SomeDependency.dll" KeyPath="yes" />
-      </Component>
-      <Component Id="AnotherDependency.dll" Guid="*">
-        <File Id="AnotherDependency.dll" Source="..\NetworkManagerAppModern\bin\Release\net8.0-windows10.0.19041.0\AnotherDependency.dll" KeyPath="yes" />
-      </Component>
+
     </ComponentGroup>
 
     <Component Id="ApplicationShortcut" Directory="ApplicationProgramsFolder">

@@ -1,6 +1,6 @@
 namespace NetworkManagerAppModern
 {
-    partial class Form1
+    partial class NetworkManagerForm
     {
         /// <summary>
         ///  Required designer variable.

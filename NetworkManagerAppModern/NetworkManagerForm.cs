@@ -44,7 +44,7 @@ namespace NetworkManagerAppModern
         }
     }
 
-    public partial class Form1 : Form
+    public partial class NetworkManagerForm : Form
     {
         private List<ColumnDefinition> _allColumnDefinitions;
         private List<string> _visibleColumnKeys;
@@ -62,7 +62,7 @@ namespace NetworkManagerAppModern
 
         private ManagementEventWatcher? _wmiWatcher;
 
-        public Form1()
+        public NetworkManagerForm()
         {
             InitializeComponent();
 
