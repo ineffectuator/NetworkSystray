@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
   <Product Id="*" Name="NetworkManagerAppModern Setup" Language="1033" Version="1.0.0.0" Manufacturer="MyCompany" UpgradeCode="a2e5f7fb-ee02-4c46-b846-df4cc7e477d2">
     <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" InstallPrivileges="elevated" />
 
@@ -48,7 +49,33 @@
     </Component>
 
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <Property Id="LAUNCHAPPONEXIT" Value="1" Secure="yes" /> <!-- Default to checked -->
     <UIRef Id="WixUI_InstallDir" />
+    <UI>
+      <Dialog Id="ExitDialog" Width="370" Height="270" Title="!(loc.ExitDialog_Title)">
+        <Control Id="Finish" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Cancel="yes" Text="!(loc.WixUIFinish)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Disabled="yes" Text="!(loc.WixUICancel)" />
+        <Control Id="Bitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="234" TabSkip="no" Text="!(loc.ExitDialogBitmap)" />
+        <Control Id="Title" Type="Text" X="135" Y="20" Width="220" Height="60" Transparent="yes" NoPrefix="yes" Text="!(loc.ExitDialogTitle)" />
+        <Control Id="Description" Type="Text" X="135" Y="70" Width="220" Height="40" Transparent="yes" NoPrefix="yes" Text="!(loc.ExitDialogDescription1)" />
+        <Control Id="LaunchCheckBox" Type="CheckBox" X="135" Y="120" Width="220" Height="17" Property="LAUNCHAPPONEXIT" CheckBoxValue="1" Text="Launch [ProductName] when setup exits." />
+      </Dialog>
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999">1</Publish>
+    </UI>
+
+    <!-- Property to hold the path to the application to launch -->
+    <Property Id="WixShellExecTarget" Value="[INSTALLFOLDER]NetworkManagerAppModern.exe" />
+
+    <!-- Custom action to launch the application -->
+    <CustomAction Id="LaunchApplication"
+                  BinaryKey="WixCA"
+                  DllEntry="WixShellExec"
+                  Impersonate="yes" />
+
+    <InstallExecuteSequence>
+      <Custom Action="LaunchApplication" After="InstallFinalize"><![CDATA[LAUNCHAPPONEXIT="1" AND NOT Installed AND NOT REMOVE]]></Custom>
+    </InstallExecuteSequence>
 
   </Product>
 </Wix>
