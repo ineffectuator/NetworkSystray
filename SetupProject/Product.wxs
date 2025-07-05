@@ -55,6 +55,9 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch NetworkManagerAppModern when setup exits." />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
+    <!-- Define SecureCustomProperties to ensure UI properties are passed to execute sequence -->
+    <Property Id="SecureCustomProperties" Value="WIX_DOWNGRADE_DETECTED;WIX_UPGRADE_DETECTED;MYAPPEXEINSTALLPATH;WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED" />
+
     <!-- Secure, uppercase property to hold the resolved executable path -->
     <Property Id="MYAPPEXEINSTALLPATH" Secure="yes" />
 
