@@ -51,7 +51,7 @@
     <UIRef Id="WixUI_InstallDir" />
     <UI>
       <!-- This Publish element sets LAUNCHAPPONEXITFLAG to 1 if the checkbox is checked when Finish is clicked on ExitDialog -->
-      <Publish Dialog="ExitDialog" Control="Finish" Event="SetProperty" Property="LAUNCHAPPONEXITFLAG" Value="1" Order="1"><![CDATA[WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED = "1"]]></Publish>
+      <Publish Dialog="ExitDialog" Control="Finish" Property="LAUNCHAPPONEXITFLAG" Value="1" Order="1"><![CDATA[WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED = "1"]]></Publish>
       <!-- If WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED is not "1", LAUNCHAPPONEXITFLAG remains "0" (its default defined above) -->
     </UI>
 
