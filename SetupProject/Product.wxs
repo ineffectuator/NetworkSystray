@@ -55,11 +55,17 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch NetworkManagerAppModern when setup exits." />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
-    <!-- Property to hold the path to the application to launch -->
-    <Property Id="WixShellExecTarget" Secure="yes" />
+    <!-- Secure, uppercase property to hold the resolved executable path -->
+    <Property Id="MYAPPEXEINSTALLPATH" Secure="yes" />
 
-    <!-- Custom action to set the WixShellExecTarget property -->
-    <CustomAction Id="SetLaunchTargetProperty" Property="WixShellExecTarget" Value="[INSTALLFOLDER]NetworkManagerAppModern.exe" />
+    <!-- Property that WixShellExec expects (mixed case) -->
+    <Property Id="WixShellExecTarget" Value="" />
+
+    <!-- Custom action to set the MYAPPEXEINSTALLPATH property -->
+    <CustomAction Id="SetMyAppExeInstallPath" Property="MYAPPEXEINSTALLPATH" Value="[INSTALLFOLDER]NetworkManagerAppModern.exe" />
+
+    <!-- Custom action to set WixShellExecTarget from the secure MYAPPEXEINSTALLPATH property -->
+    <CustomAction Id="SetWixShellExecTargetFromSecure" Property="WixShellExecTarget" Value="[MYAPPEXEINSTALLPATH]" />
 
     <!-- Custom action to launch the application -->
     <CustomAction Id="LaunchApplication"
@@ -68,7 +74,8 @@
                   Impersonate="yes" />
 
     <InstallExecuteSequence>
-      <Custom Action="SetLaunchTargetProperty" After="CostFinalize" />
+      <Custom Action="SetMyAppExeInstallPath" After="CostFinalize" />
+      <Custom Action="SetWixShellExecTargetFromSecure" Before="LaunchApplication"><![CDATA[WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED="1" AND NOT Installed AND NOT REMOVE]]></Custom>
       <Custom Action="LaunchApplication" After="InstallFinalize"><![CDATA[WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED="1" AND NOT Installed AND NOT REMOVE]]></Custom>
     </InstallExecuteSequence>
 
