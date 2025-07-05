@@ -59,7 +59,7 @@
     <Property Id="MYAPPEXEINSTALLPATH" Secure="yes" />
 
     <!-- Property that WixShellExec expects (mixed case) -->
-    <Property Id="WixShellExecTarget" Value="" />
+    <Property Id="WixShellExecTarget" Hidden="yes" />
 
     <!-- Custom action to set the MYAPPEXEINSTALLPATH property -->
     <CustomAction Id="SetMyAppExeInstallPath" Property="MYAPPEXEINSTALLPATH" Value="[INSTALLFOLDER]NetworkManagerAppModern.exe" />
