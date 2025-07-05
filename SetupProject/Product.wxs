@@ -52,11 +52,11 @@
     <UIRef Id="WixUI_InstallDir" />
 
     <!-- Properties for WixUI_InstallDir optional checkbox on ExitDialog -->
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch [ProductName] when setup exits." />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch NetworkManagerAppModern when setup exits." />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
     <!-- Property to hold the path to the application to launch -->
-    <Property Id="WixShellExecTarget" />
+    <Property Id="WixShellExecTarget" Secure="yes" />
 
     <!-- Custom action to set the WixShellExecTarget property -->
     <CustomAction Id="SetLaunchTargetProperty" Property="WixShellExecTarget" Value="[INSTALLFOLDER]NetworkManagerAppModern.exe" />
