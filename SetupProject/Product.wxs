@@ -26,7 +26,6 @@
       <Component Id="NetworkManagerAppModern.exe" Guid="*">
         <File Id="NetworkManagerAppModern.exe" Source="..\NetworkManagerAppModern\bin\Release\net8.0-windows10.0.19041.0\NetworkManagerAppModern.exe" KeyPath="yes" Checksum="yes"/>
       </Component>
-
     </ComponentGroup>
 
     <Component Id="ApplicationShortcut" Directory="ApplicationProgramsFolder">
@@ -50,18 +49,23 @@
 
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     <UIRef Id="WixUI_InstallDir" />
+    <UI>
+      <!-- This Publish element sets LAUNCHAPPONEXITFLAG to 1 if the checkbox is checked when Finish is clicked on ExitDialog -->
+      <Publish Dialog="ExitDialog" Control="Finish" Event="SetProperty" Property="LAUNCHAPPONEXITFLAG" Value="1" Order="1"><![CDATA[WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED = "1"]]></Publish>
+      <!-- If WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED is not "1", LAUNCHAPPONEXITFLAG remains "0" (its default defined above) -->
+    </UI>
 
     <!-- Properties for WixUI_InstallDir optional checkbox on ExitDialog -->
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch NetworkManagerAppModern when setup exits." />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
-    <!-- Define SecureCustomProperties to ensure UI properties are passed to execute sequence -->
-    <Property Id="SecureCustomProperties" Value="WIX_DOWNGRADE_DETECTED;WIX_UPGRADE_DETECTED;MYAPPEXEINSTALLPATH;WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED" />
+    <!-- Secure, public property to control launching app on exit, passed from UI to Execute sequence -->
+    <Property Id="LAUNCHAPPONEXITFLAG" Secure="yes" Value="0" />
 
     <!-- Secure, uppercase property to hold the resolved executable path -->
     <Property Id="MYAPPEXEINSTALLPATH" Secure="yes" />
 
-    <!-- Property that WixShellExec expects (mixed case) -->
+    <!-- Property that WixShellExec expects (mixed case), Hidden to avoid CNDL1006 without Value -->
     <Property Id="WixShellExecTarget" Hidden="yes" />
 
     <!-- Custom action to set the MYAPPEXEINSTALLPATH property -->
@@ -78,8 +82,8 @@
 
     <InstallExecuteSequence>
       <Custom Action="SetMyAppExeInstallPath" After="CostFinalize" />
-      <Custom Action="SetWixShellExecTargetFromSecure" Before="LaunchApplication"><![CDATA[WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED="1" AND NOT Installed AND NOT REMOVE]]></Custom>
-      <Custom Action="LaunchApplication" After="InstallFinalize"><![CDATA[WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED="1" AND NOT Installed AND NOT REMOVE]]></Custom>
+      <Custom Action="SetWixShellExecTargetFromSecure" Before="LaunchApplication"><![CDATA[LAUNCHAPPONEXITFLAG="1" AND NOT Installed AND NOT REMOVE]]></Custom>
+      <Custom Action="LaunchApplication" After="InstallFinalize"><![CDATA[LAUNCHAPPONEXITFLAG="1" AND NOT Installed AND NOT REMOVE]]></Custom>
     </InstallExecuteSequence>
 
   </Product>
