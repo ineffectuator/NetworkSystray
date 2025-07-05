@@ -49,11 +49,6 @@
 
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     <UIRef Id="WixUI_InstallDir" />
-    <UI>
-      <!-- This Publish element sets LAUNCHAPPONEXITFLAG to 1 if the checkbox is checked when Finish is clicked on ExitDialog -->
-      <Publish Dialog="ExitDialog" Control="Finish" Property="LAUNCHAPPONEXITFLAG" Value="1" Order="1"><![CDATA[WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED = "1"]]></Publish>
-      <!-- If WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED is not "1", LAUNCHAPPONEXITFLAG remains "0" (its default defined above) -->
-    </UI>
 
     <!-- Properties for WixUI_InstallDir optional checkbox on ExitDialog -->
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch NetworkManagerAppModern when setup exits." />
@@ -74,6 +69,10 @@
     <!-- Custom action to set WixShellExecTarget from the secure MYAPPEXEINSTALLPATH property -->
     <CustomAction Id="SetWixShellExecTargetFromSecure" Property="WixShellExecTarget" Value="[MYAPPEXEINSTALLPATH]" />
 
+    <!-- Custom Actions to set LAUNCHAPPONEXITFLAG in UI Sequence -->
+    <CustomAction Id="SetLaunchAppFlagToOne_UI" Property="LAUNCHAPPONEXITFLAG" Value="1" />
+    <CustomAction Id="SetLaunchAppFlagToZero_UI" Property="LAUNCHAPPONEXITFLAG" Value="0" />
+
     <!-- Custom action to launch the application -->
     <CustomAction Id="LaunchApplication"
                   BinaryKey="WixCA"
@@ -85,6 +84,14 @@
       <Custom Action="SetWixShellExecTargetFromSecure" Before="LaunchApplication"><![CDATA[LAUNCHAPPONEXITFLAG="1" AND NOT Installed AND NOT REMOVE]]></Custom>
       <Custom Action="LaunchApplication" After="InstallFinalize"><![CDATA[LAUNCHAPPONEXITFLAG="1" AND NOT Installed AND NOT REMOVE]]></Custom>
     </InstallExecuteSequence>
+
+    <InstallUISequence>
+      <!-- These actions set the LAUNCHAPPONEXITFLAG based on the checkbox state right before transitioning to the execute sequence. -->
+      <!-- Default to 0 (don't launch) -->
+      <Custom Action="SetLaunchAppFlagToZero_UI" Before="ExecuteAction">1</Custom>
+      <!-- If checkbox is checked, set to 1 (launch) -->
+      <Custom Action="SetLaunchAppFlagToOne_UI" Before="ExecuteAction"><![CDATA[WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED = "1" OR WIXUI_EXITDIALOGOPTIONALCHECKBOX_CHECKED = 1]]></Custom>
+    </InstallUISequence>
 
   </Product>
 </Wix>
